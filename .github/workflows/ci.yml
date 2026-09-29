@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test
+
+      # `npm run data:check` is deliberately not run here. It re-packs public/data from
+      # pipeline/cache, which is gitignored (711 MB of skeletons plus a 20 GB synapse stream to
+      # rebuild) and needs Python with numpy. The unit tests already check the committed files'
+      # integrity and the format round-trip; run data:check locally after touching pipeline/.
+
+      - name: Build
+        run: npm run build
+
+      # Chromium comes from Playwright, cached on the lockfile because the binary only changes when
+      # the Playwright dependency does. The install still runs: it is a no-op for the binary on a
+      # cache hit, and `--with-deps` puts the system packages in place either way.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # A runner has no GPU, so WebGPU falls back to SwiftShader or is absent. --allow-software skips
+      # the `isWebGPU === true` assertion and the GPU/CPU parity run (which needs real compute), but
+      # still requires zero console errors, /about and the social image, and a running simulation.
+      - name: Smoke test
+        run: npm run test:smoke -- --allow-software
