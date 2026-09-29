@@ -18,3 +18,9 @@ User's bar: unique, shareable, real data on screen.
 - All checks green on 9774112: tsc, lint, 119 tests, build, smoke (WebGPU, WebGL2, parity 1.6%), pack --check.
 - Repo: github.com/BadCodesGG/cubic-mm (private). main = scaffold base; PR from feat/one-cubic-millimetre carries the build.
 - Ideas for a follow-up round (from the user's "what would improve it" question): scripted intro, return-to-cluster + minimap, shareable camera links, cascade counter and lines, cell search, time control, screenshot mode, regenerate hero-still.jpg.
+
+## Round 3 and deploy (2026-09-29)
+- PR #2 merged on local evidence (Actions budget block again). 222 tests, smoke green, driven cascade hop 1 GPU 8 / CPU 10.
+- Vercel: project `cubic-mm` in team badcodes-apps, GitHub-connected, production https://cubic-mm.vercel.app, NEXT_PUBLIC_SITE_URL set for production. `vercel.json` deploys main only.
+- Verified live: WebGPU hi/2, real data, tour plays on first visit, cascade panel shows real numbers, no console errors.
+- Known cosmetic: the intro's opening seconds are very dark (wide pose far outside the cluster); LinkSync baseline is the tour's wide pose, so a hash is written after the tour even if the visitor never moved.
