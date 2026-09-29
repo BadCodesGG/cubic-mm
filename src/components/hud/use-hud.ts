@@ -103,7 +103,7 @@ export interface Status {
 /** Neuron and synapse counts and backend from the `mode` event, frame time and tier from `window.__cmm` twice a second. */
 export function useStatus(app: App): Status {
   const [status, setStatus] = useState<Status>(() => ({
-    gpu: window.__cmm?.isWebGPU ?? false,
+    gpu: window.__cmm?.sim?.mode === "gpu",
     neurons: app.data.neurons.count,
     synapses: app.data.synapses ? app.data.synapses.count : null,
     frameMs: window.__cmm?.frameMs ?? 0,

@@ -12,7 +12,7 @@ export function WhatYouAreLookingAt({ facts }: { facts: DatasetFacts }) {
         A cubic millimetre of mouse visual cortex, called minnie65 by the MICrONS project: the only piece of brain ever
         mapped to every synapse. Cell by cell and wire by wire, it is the largest piece anyone has traced.
       </p>
-      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-3">
         <Stat value={int.format(facts.neuronCount)} label="neurons" />
         <Stat value={int.format(facts.synapseCount)} label="synapses between them" />
         <Stat value={`${int.format(Math.round(x))} × ${int.format(Math.round(z))} µm`} label="width × length" />
@@ -23,6 +23,7 @@ export function WhatYouAreLookingAt({ facts }: { facts: DatasetFacts }) {
         one is a proofread skeleton: a person checked and corrected the automatic tracing.
       </p>
       <Table
+        nowrapFirst
         caption="Neurons in this view by cell type"
         head={["Type", "Cells", "What it is"]}
         rows={facts.cellTypes.map((t) => [t.code || "none", int.format(t.count), t.name])}
@@ -95,7 +96,7 @@ export function TheSimulation() {
         slowed 1,000 times, so the same pulse takes 1.6 s on screen. Membrane dynamics keep their real speed.
       </p>
       <Table caption="Default simulation parameters" head={["Parameter", "Value", "Note"]} rows={PARAMS} />
-      <h3 className="pt-2 font-mono text-[10px] uppercase tracking-[0.28em] text-amber-200/80">Honest caveats</h3>
+      <h3 className="pt-2 font-mono text-[11px] uppercase tracking-[0.24em] text-amber-200">Honest caveats</h3>
       <ul className="list-disc space-y-2 pl-5 marker:text-slate-600">
         <li>These are point neurons. There is no dendritic computation: a synapse far out on a branch counts the same as one at the soma.</li>
         <li>The data has no myelination, so one conduction velocity stands in for every axon.</li>
