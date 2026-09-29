@@ -5,8 +5,13 @@
  *   reached  post cells the root's pulses have arrived at (`arrive` with pre === root). The sim always
  *            reports the watched neuron's arrivals, so this set is exact.
  *   hop 1    reached cells that spiked within HOP_WINDOW_S after an arrival from the root.
- *   hop 2    cells that spiked within HOP_WINDOW_S after an arrival from a hop-1 cell. The sim reports
- *            only a sample of arrivals from cells it is not watching, so hop 2 is a lower bound.
+ *   hop 2    cells that spiked within HOP_WINDOW_S after an arrival from a hop-1 cell.
+ * When a spike carries its drive generation (the sim sets it: see `sim/model.ts`), "caused" is exact
+ * rather than timed: a hop-1 spike is generation 1, and hop 2 counts every later generation, fired
+ * by a hop-1 or hop-2 cell. A spike that only happened to follow a landing (generation 255) is not
+ * counted, and the landing still names the edge's source. The sim reports every arrival from a
+ * driven spike, so hop 2 is then exact too. Spikes without a generation fall back to the timing
+ * window, where arrivals from cells the sim is not watching are sampled and hop 2 is a lower bound.
  * A step's spikes and arrivals reach the bus in either order, so each is matched against the other's
  * record whichever comes second. Arrivals from inhibitory cells are ignored: they make nothing fire.
  *
@@ -15,10 +20,12 @@
  * per neuron for the life of one cascade; a cascade goes stale within seconds, so the log stays small.
  */
 
-import type { EventBus } from "./events";
+import type { EventBus, SpikeEvent } from "./events";
 
 /** A spike this soon after a pulse landed is counted as caused by it. */
 export const HOP_WINDOW_S = 0.05;
+/** The drive generation of a spike no stimulus caused. */
+const NO_GENERATION = 255;
 /** A cascade with no new caused event for this long is no longer active. */
 export const STALE_S = 12;
 /** Width of the timeline the HUD draws. */
@@ -33,13 +40,15 @@ export interface CascadeSummary {
   root: number;
   reached: number;
   hop1: number;
-  /** A lower bound: arrivals from cells other than the root are sampled by the sim. */
+  /** Every hop after the first. A lower bound when spikes carry no drive generation. */
   hop2: number;
   total: number;
   /** Seconds from the stimulus to the last spike it caused. */
   durationS: number;
   /** Seconds from the stimulus to the last hop-1 spike. */
   hop1SpanS: number;
+  /** The hop-1 cells, sorted. */
+  hop1Cells: number[];
 }
 
 export interface CascadeTick {
@@ -55,12 +64,32 @@ export interface CascadeOptions {
   inhibitory?: ArrayLike<number>;
 }
 
+/** A spike event, with the drive generation the simulation attaches when it has one. */
+export type DrivenSpikeEvent = SpikeEvent & { generation?: number };
+
 interface Landing {
   from: number;
+  /** 1 when `from` is a hop-1 cell, 2 when it is a later one. */
+  fromHop: 1 | 2;
   time: number;
 }
 
+interface LoggedSpike {
+  time: number;
+  generation?: number;
+}
+
 const within = (spike: number, arrival: number) => spike - arrival >= -1e-9 && spike - arrival <= HOP_WINDOW_S + 1e-9;
+
+/** Whether `spike` was caused by a pulse that landed at `arrival`, from the root (1) or from a later cell. */
+function causedBy(spike: LoggedSpike, arrival: number, landing: 1 | Landing): boolean {
+  if (!within(spike.time, arrival)) return false;
+  const g = spike.generation;
+  if (landing === 1) return g === undefined || g === 1;
+  // Without a generation only hop-1 cells are followed, as the timing heuristic always did.
+  if (g === undefined) return landing.fromHop === 1;
+  return g >= 2 && g < NO_GENERATION;
+}
 
 export class CascadeTracker {
   private root = -1;
@@ -71,14 +100,14 @@ export class CascadeTracker {
   private latestNeuron = -1;
   private readonly reached = new Set<number>();
   private readonly rootLandings = new Map<number, number[]>();
-  private readonly hop1Landings = new Map<number, Landing[]>();
+  private readonly laterLandings = new Map<number, Landing[]>();
   private readonly hop1 = new Set<number>();
   private readonly hop2 = new Set<number>();
   private hop1Edges: CascadeEdge[] = [];
   private hop2Edges: CascadeEdge[] = [];
   private readonly edgeKeys = new Set<string>();
   private ticks: (CascadeTick & { time: number })[] = [];
-  private readonly spikes = new Map<number, number[]>();
+  private readonly spikes = new Map<number, LoggedSpike[]>();
   private edgeCache: readonly CascadeEdge[] = [];
   private edgeVersion = 0;
   private cachedVersion = -1;
@@ -90,7 +119,7 @@ export class CascadeTracker {
   ) {
     this.off = [
       bus.on("stimulate", ({ neuron }) => this.start(neuron)),
-      bus.on("spike", ({ neuron, time }) => this.onSpike(neuron, time)),
+      bus.on("spike", (e: DrivenSpikeEvent) => this.onSpike(e.neuron, { time: e.time, generation: e.generation })),
       bus.on("arrive", ({ pre, post, time }) => this.onArrive(pre, post, time)),
     ];
   }
@@ -128,6 +157,7 @@ export class CascadeTracker {
       total: this.hop1.size + hop2,
       durationS: this.lastCaused >= 0 ? this.lastCaused - this.t0 : 0,
       hop1SpanS: this.lastHop1 >= 0 ? this.lastHop1 - this.t0 : 0,
+      hop1Cells: [...this.hop1].sort((a, b) => a - b),
     };
   }
 
@@ -156,7 +186,7 @@ export class CascadeTracker {
     this.latestNeuron = -1;
     this.reached.clear();
     this.rootLandings.clear();
-    this.hop1Landings.clear();
+    this.laterLandings.clear();
     this.hop1.clear();
     this.hop2.clear();
     this.hop1Edges = [];
@@ -203,39 +233,42 @@ export class CascadeTracker {
     this.addEdge(2, from, neuron, time);
   }
 
-  private onSpike(neuron: number, time: number): void {
+  private onSpike(neuron: number, spike: LoggedSpike): void {
     if (this.root < 0 || !this.active) return;
     const log = this.spikes.get(neuron);
-    if (log) log.push(time);
-    else this.spikes.set(neuron, [time]);
-    if (neuron === this.root || time < this.t0) return;
+    if (log) log.push(spike);
+    else this.spikes.set(neuron, [spike]);
+    if (neuron === this.root || spike.time < this.t0) return;
 
-    if (this.rootLandings.get(neuron)?.some((ta) => within(time, ta))) {
-      this.landHop1(neuron, time);
+    if (this.rootLandings.get(neuron)?.some((ta) => causedBy(spike, ta, 1))) {
+      this.landHop1(neuron, spike.time);
       return;
     }
-    for (const l of this.hop1Landings.get(neuron) ?? []) {
-      if (within(time, l.time)) this.landHop2(l.from, neuron, time);
+    for (const l of this.laterLandings.get(neuron) ?? []) {
+      if (causedBy(spike, l.time, l)) this.landHop2(l.from, neuron, spike.time);
     }
   }
 
   private onArrive(pre: number, post: number, time: number): void {
     if (this.root < 0 || !this.active || time < this.t0) return;
     if (this.opts.inhibitory?.[pre]) return;
-    const fired = post === this.root ? undefined : this.spikes.get(post)?.find((ts) => within(ts, time));
+    const fired = (landing: 1 | Landing) =>
+      post === this.root ? undefined : this.spikes.get(post)?.find((s) => causedBy(s, time, landing))?.time;
     if (pre === this.root) {
       this.reached.add(post);
       this.lastEvent = Math.max(this.lastEvent, time);
       const list = this.rootLandings.get(post);
       if (list) list.push(time);
       else this.rootLandings.set(post, [time]);
-      if (fired !== undefined) this.landHop1(post, fired);
-    } else if (this.hop1.has(pre)) {
-      const list = this.hop1Landings.get(post);
-      const landing = { from: pre, time };
+      const at = fired(1);
+      if (at !== undefined) this.landHop1(post, at);
+    } else if (this.hop1.has(pre) || this.hop2.has(pre)) {
+      const landing: Landing = { from: pre, fromHop: this.hop1.has(pre) ? 1 : 2, time };
+      const list = this.laterLandings.get(post);
       if (list) list.push(landing);
-      else this.hop1Landings.set(post, [landing]);
-      if (fired !== undefined) this.landHop2(pre, post, fired);
+      else this.laterLandings.set(post, [landing]);
+      const at = fired(landing);
+      if (at !== undefined) this.landHop2(pre, post, at);
     }
   }
 }

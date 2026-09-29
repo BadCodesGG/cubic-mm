@@ -12,6 +12,15 @@
  *      a pulse arriving inside (t - dt, t] adds the synapse's weight to the post neuron's input.
  *   2. Neurons: Poisson background, integrate with exact exponential decay, threshold, reset,
  *      refractory period (during which v is held at vReset and input is discarded).
+ *
+ * The driven cascade. With the delay stretched 1000x and tau left at 20 ms, pulses from different
+ * cells land seconds apart and never sum, so one ordinary spike (weight 0.08 to 0.16) cannot fire
+ * anything. A visitor's stimulus therefore carries a drive generation: the stimulated spike is
+ * generation 0, and a spike fired in the same step an excitatory generation-g pulse landed is
+ * generation g + 1. A generation-g pulse delivers `weight * drivenGain[g]` (12, 4, 2, 1, then 1), so
+ * hop 1 fires reliably, hop 2 when the wiring is dense, and the cascade dies out by itself.
+ * Every other spike is generation NO_GENERATION and delivers its weight x1 exactly, so the
+ * background dynamics are the same as without the mechanism.
  */
 
 import { PATH_DIST_UNIT_UM, type SynapseTable } from "../format";
@@ -22,8 +31,28 @@ export const SPIKE_SLOTS = 8;
 export const EMPTY_SPIKE = -1e9;
 /** Most non-watched arrivals one step reports; the audio layer does not need every one. */
 export const ARRIVAL_SAMPLE = 64;
-/** Current `stimulate` injects by default: enough to fire a resting cell against some inhibition. */
+/**
+ * Current `stimulate` injects by default. A stimulated cell fires on its next non-refractory step
+ * whatever its potential: a hub cell under heavy inhibition sat near -1 and let a +2 kick fall short,
+ * so the visitor's click did nothing. The amount still reaches the input, and flags the spike.
+ */
 export const STIMULUS = 2;
+/** The generation of an ordinary spike, one no stimulus caused; also an empty slot's. */
+export const NO_GENERATION = 255;
+
+/** The generation of a spike fired while the lowest driven generation arriving was `drivenIn`. */
+export function nextGeneration(stimulated: boolean, drivenIn: number): number {
+  return stimulated ? 0 : Math.min(drivenIn + 1, NO_GENERATION);
+}
+
+/** The gain a pulse of each generation (0..255) is delivered at: `drivenGain[g]`, else 1. */
+export function drivenGainTable(p: Pick<ModelParams, "drivenGain">): Float32Array {
+  const out = new Float32Array(NO_GENERATION + 1).fill(1);
+  p.drivenGain.forEach((g, i) => {
+    if (i < NO_GENERATION) out[i] = g;
+  });
+  return out;
+}
 
 export interface ModelParams {
   tauMs: number;
@@ -49,6 +78,8 @@ export interface ModelParams {
   /** Stretches the travel delay only. */
   slowMo: number;
   synDelayMs: number;
+  /** Weight multiplier for a pulse of drive generation 0, 1, 2...; 1 past the end and for ordinary spikes. */
+  drivenGain: number[];
 }
 
 export const DEFAULT_PARAMS: ModelParams = {
@@ -65,6 +96,7 @@ export const DEFAULT_PARAMS: ModelParams = {
   conductionMps: 0.5,
   slowMo: 1000,
   synDelayMs: 1,
+  drivenGain: [12, 4, 2, 1],
 };
 
 /** The parts of the synapse table the model needs (positions are only for drawing). */
@@ -83,6 +115,8 @@ export interface ModelSpike {
   neuron: number;
   time: number;
   stimulated: boolean;
+  /** Drive generation: 0 for the stimulated spike, g + 1 when a generation-g pulse fired it, NO_GENERATION otherwise. */
+  generation: number;
 }
 
 export interface ModelArrival {
@@ -95,7 +129,7 @@ export interface ModelArrival {
 
 export interface StepResult {
   spikes: ModelSpike[];
-  /** Every arrival from the watched neuron, plus up to ARRIVAL_SAMPLE others. */
+  /** Every arrival from the watched neuron or from a driven spike, plus up to ARRIVAL_SAMPLE others. */
   arrivals: ModelArrival[];
   /** Total arrivals this step, including the ones not sampled. */
   arrivalCount: number;
@@ -128,6 +162,8 @@ export class SpikingModel {
   readonly refractoryUntil: Float64Array;
   /** Last SPIKE_SLOTS spike times per neuron, seconds; neuron n owns [n * 8, n * 8 + 8). */
   readonly spikeTimes: Float32Array;
+  /** Drive generation of each spike slot, parallel to `spikeTimes`; NO_GENERATION when empty or ordinary. */
+  readonly spikeGen: Uint8Array;
   /** Next slot each neuron writes. */
   readonly spikeHead: Uint8Array;
   readonly input: Float32Array;
@@ -137,6 +173,9 @@ export class SpikingModel {
   private readonly syn: ModelSynapses;
   private readonly delay: Float32Array;
   private readonly weight: Float32Array;
+  private readonly gain: Float32Array;
+  /** Lowest generation of any excitatory driven pulse landing on each neuron this step. */
+  private readonly drivenIn: Uint8Array;
   /** Longest delay out of each neuron: slots older than this cannot deliver anything. */
   private readonly maxDelay: Float32Array;
   private readonly minDelay: Float32Array;
@@ -153,13 +192,16 @@ export class SpikingModel {
     this.v = new Float32Array(n).fill(this.params.vRest);
     this.refractoryUntil = new Float64Array(n).fill(-Infinity);
     this.spikeTimes = new Float32Array(n * SPIKE_SLOTS).fill(EMPTY_SPIKE);
+    this.spikeGen = new Uint8Array(n * SPIKE_SLOTS).fill(NO_GENERATION);
     this.spikeHead = new Uint8Array(n);
+    this.drivenIn = new Uint8Array(n).fill(NO_GENERATION);
     this.input = new Float32Array(n);
     this.stimulated = new Uint8Array(n);
     this.pendingStimulus = new Float32Array(n);
     this.random = rng(init.seed);
     this.delay = synapseDelays(init.synapses, this.params);
     this.weight = synapseWeights(init.synapses, init.inhibitory, this.params);
+    this.gain = drivenGainTable(this.params);
     this.maxDelay = new Float32Array(n);
     this.minDelay = new Float32Array(n).fill(Infinity);
     for (let s = 0; s < init.synapses.count; s++) {
@@ -169,7 +211,7 @@ export class SpikingModel {
     }
   }
 
-  /** Adds `amount` to the neuron's input on the next step, and watches its cascade. */
+  /** Adds `amount` to the neuron's input and fires it on the next step it is not refractory; watches its cascade. */
   stimulate(neuron: number, amount = STIMULUS): void {
     this.input[neuron] += amount;
     this.pendingStimulus[neuron] += amount;
@@ -198,13 +240,19 @@ export class SpikingModel {
         const tau = this.spikeTimes[p * SPIKE_SLOTS + k];
         // Nothing from this spike can land in (lo, t].
         if (tau + this.maxDelay[p] <= lo || tau + this.minDelay[p] > t) continue;
+        const gen = this.spikeGen[p * SPIKE_SLOTS + k];
+        const gain = this.gain[gen];
         for (let s = start; s < end; s++) {
           const arrival = tau + this.delay[s];
           if (arrival <= lo || arrival > t) continue;
           const q = post[s];
-          this.input[q] += this.weight[s];
+          const w = this.weight[s];
+          // The gain is exactly 1 for an ordinary spike, so the background is bit-identical to the ungained model.
+          this.input[q] += w * gain;
+          // Only an excitatory pulse can be what fired its target.
+          if (gen < this.drivenIn[q] && w > 0) this.drivenIn[q] = gen;
           count++;
-          if (p === this.watched) sample.push({ pre: p, post: q, synapse: s, time: arrival });
+          if (p === this.watched || gen !== NO_GENERATION) sample.push({ pre: p, post: q, synapse: s, time: arrival });
           else if (others < ARRIVAL_SAMPLE) {
             others++;
             sample.push({ pre: p, post: q, synapse: s, time: arrival });
@@ -221,6 +269,8 @@ export class SpikingModel {
     const bgChance = p.backgroundRateHz > 0 ? 1 - Math.exp(-p.backgroundRateHz * dt) : 0;
     const spikes: ModelSpike[] = [];
     for (let n = 0; n < this.neuronCount; n++) {
+      const drivenIn = this.drivenIn[n];
+      this.drivenIn[n] = NO_GENERATION;
       if (t < this.refractoryUntil[n]) {
         // Synaptic and background input is discarded during the refractory period, but a visitor's
         // stimulus is held for the next step, so a press timed against the cell's own spike still
@@ -236,13 +286,15 @@ export class SpikingModel {
       this.stimulated[n] = 0;
       this.pendingStimulus[n] = 0;
       const v = p.vRest + (this.v[n] - p.vRest) * decay + input;
-      if (v >= p.vThreshold) {
+      if (v >= p.vThreshold || stimulated) {
         const head = this.spikeHead[n];
+        const generation = nextGeneration(stimulated, drivenIn);
         this.spikeTimes[n * SPIKE_SLOTS + head] = t;
+        this.spikeGen[n * SPIKE_SLOTS + head] = generation;
         this.spikeHead[n] = (head + 1) % SPIKE_SLOTS;
         this.v[n] = p.vReset;
         this.refractoryUntil[n] = t + p.refractoryMs / 1000;
-        spikes.push({ neuron: n, time: t, stimulated });
+        spikes.push({ neuron: n, time: t, stimulated, generation });
       } else {
         this.v[n] = v;
       }

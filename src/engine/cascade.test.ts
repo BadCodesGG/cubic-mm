@@ -13,6 +13,11 @@ let tracker: CascadeTracker;
 const spike = (neuron: number, time: number) => bus.emit("spike", { neuron, time, stimulated: false });
 const arrive = (pre: number, post: number, time: number) => bus.emit("arrive", { pre, post, synapse: 0, time });
 const stimulate = (neuron: number) => bus.emit("stimulate", { neuron });
+/** A spike as the simulation reports it now, carrying its drive generation (255 = none). */
+const driven = (neuron: number, time: number, generation: number) => {
+  const event = { neuron, time, stimulated: false, generation };
+  bus.emit("spike", event);
+};
 
 beforeEach(() => {
   bus = new EventBus();
@@ -112,7 +117,7 @@ describe("CascadeTracker", () => {
     arrive(1, 2, 1.1);
     spike(2, 1.11);
     stimulate(7);
-    expect(tracker.summary()).toEqual({ root: 7, reached: 0, hop1: 0, hop2: 0, total: 0, durationS: 0, hop1SpanS: 0 });
+    expect(tracker.summary()).toEqual({ root: 7, reached: 0, hop1: 0, hop2: 0, total: 0, durationS: 0, hop1SpanS: 0, hop1Cells: [] });
     expect(tracker.edges()).toEqual([]);
     expect(tracker.timeline()).toEqual([]);
     expect(tracker.latest()).toBe(-1);
@@ -158,6 +163,40 @@ describe("CascadeTracker", () => {
     expect(tracker.edges()).toHaveLength(MAX_EDGES);
     expect(tracker.summary().hop1).toBe(MAX_EDGES + 50);
     expect(tracker.edges()[0]).toEqual([1, 10, 1.11]);
+  });
+
+  it("counts by drive generation when spikes carry one, ignoring coincidences and other cascades", () => {
+    stimulate(5);
+    arrive(5, 10, 1.4);
+    driven(10, 1.41, 1);
+    // Fired 20 ms after the root's pulse landed, but by background: generation 255.
+    arrive(5, 11, 1.4);
+    driven(11, 1.42, 255);
+    // A step reports its spikes before its arrivals.
+    driven(12, 1.5, 1);
+    arrive(5, 12, 1.49);
+    arrive(10, 20, 2.0);
+    driven(20, 2.01, 2);
+    // Generation 3, fired by the hop-2 cell 20: counted with the later hops.
+    driven(21, 2.5, 3);
+    arrive(20, 21, 2.49);
+    // Generation 2, but from a cell outside this cascade.
+    arrive(99, 30, 2.59);
+    driven(30, 2.6, 2);
+
+    expect(tracker.summary()).toMatchObject({ reached: 3, hop1: 2, hop2: 2, total: 4, hop1Cells: [10, 12] });
+    expect(tracker.edges()).toEqual([
+      [5, 10, 1.41],
+      [5, 12, 1.5],
+      [10, 20, 2.01],
+      [20, 21, 2.5],
+    ]);
+    expect(tracker.timeline().map((k) => [k.hop, k.neuron])).toEqual([
+      [1, 10],
+      [1, 12],
+      [2, 20],
+      [2, 21],
+    ]);
   });
 
   it("stops listening once disposed", () => {
