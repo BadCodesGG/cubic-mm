@@ -19,6 +19,7 @@ export const CELL_TYPE_NAMES: Readonly<Record<string, string>> = {
   "5P-ET": "layer 5 ET pyramidal",
   "5P-NP": "layer 5 near-projecting pyramidal",
   "6P-IT": "layer 6 IT pyramidal",
+  "6P-U": "layer 6 pyramidal, unclassified",
   "6P-CT": "layer 6 corticothalamic pyramidal",
   BC: "basket cell",
   MC: "Martinotti cell",
