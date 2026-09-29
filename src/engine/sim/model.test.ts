@@ -90,13 +90,28 @@ describe("SpikingModel on a hand-built three-neuron net", () => {
     m.stimulate(A);
     const first = run(m, 0, 0.001);
     expect(first.spikes.filter((s) => s.neuron === A)).toHaveLength(1);
-    m.stimulate(A);
-    const inside = run(m, 0.001, 0.003);
-    expect(inside.spikes.filter((s) => s.neuron === A)).toHaveLength(0);
+    run(m, 0.001, 0.003);
     run(m, 0.003, 0.006);
     m.stimulate(A);
     const outside = run(m, 0.006, 0.007);
     expect(outside.spikes.filter((s) => s.neuron === A)).toHaveLength(1);
+  });
+
+  it("holds a stimulus that lands inside the refractory window and fires it once the window closes", () => {
+    const m = threeNeuronNet();
+    m.stimulate(A);
+    run(m, 0, 0.001);
+    // Pressed while refractory (until 0.005): nothing fires inside the window...
+    m.stimulate(A);
+    const inside = run(m, 0.001, 0.004);
+    expect(inside.spikes.filter((s) => s.neuron === A)).toHaveLength(0);
+    // ...and the held stimulus fires on the first step after it, flagged as stimulated.
+    const after = run(m, 0.004, 0.008);
+    const held = after.spikes.filter((s) => s.neuron === A);
+    expect(held).toHaveLength(1);
+    expect(held[0].stimulated).toBe(true);
+    // The first spike was at 0.0005, so the window closes at 0.0045 and the held stimulus fires there.
+    expect(held[0].time).toBeCloseTo(0.0045, 6);
   });
 
   it("records spike times in an 8-slot ring per neuron", () => {

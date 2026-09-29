@@ -141,6 +141,8 @@ export class SpikingModel {
   private readonly maxDelay: Float32Array;
   private readonly minDelay: Float32Array;
   private readonly stimulated: Uint8Array;
+  /** What each pending stimulus injected, so it can be re-queued past a refractory window. */
+  private readonly pendingStimulus: Float32Array;
   private readonly random: () => number;
 
   constructor(init: ModelInit) {
@@ -154,6 +156,7 @@ export class SpikingModel {
     this.spikeHead = new Uint8Array(n);
     this.input = new Float32Array(n);
     this.stimulated = new Uint8Array(n);
+    this.pendingStimulus = new Float32Array(n);
     this.random = rng(init.seed);
     this.delay = synapseDelays(init.synapses, this.params);
     this.weight = synapseWeights(init.synapses, init.inhibitory, this.params);
@@ -169,6 +172,7 @@ export class SpikingModel {
   /** Adds `amount` to the neuron's input on the next step, and watches its cascade. */
   stimulate(neuron: number, amount = STIMULUS): void {
     this.input[neuron] += amount;
+    this.pendingStimulus[neuron] += amount;
     this.stimulated[neuron] = 1;
     this.watched = neuron;
   }
@@ -217,15 +221,20 @@ export class SpikingModel {
     const bgChance = p.backgroundRateHz > 0 ? 1 - Math.exp(-p.backgroundRateHz * dt) : 0;
     const spikes: ModelSpike[] = [];
     for (let n = 0; n < this.neuronCount; n++) {
+      if (t < this.refractoryUntil[n]) {
+        // Synaptic and background input is discarded during the refractory period, but a visitor's
+        // stimulus is held for the next step, so a press timed against the cell's own spike still
+        // fires it once the window closes.
+        this.v[n] = p.vReset;
+        this.input[n] = this.stimulated[n] ? this.pendingStimulus[n] : 0;
+        continue;
+      }
       let input = this.input[n];
       this.input[n] = 0;
       if (bgChance > 0 && this.random() < bgChance) input += p.backgroundWeight;
       const stimulated = this.stimulated[n] === 1;
       this.stimulated[n] = 0;
-      if (t < this.refractoryUntil[n]) {
-        this.v[n] = p.vReset;
-        continue;
-      }
+      this.pendingStimulus[n] = 0;
       const v = p.vRest + (this.v[n] - p.vRest) * decay + input;
       if (v >= p.vThreshold) {
         const head = this.spikeHead[n];

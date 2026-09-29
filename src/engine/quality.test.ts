@@ -61,13 +61,28 @@ describe("FrameBudget", () => {
     const slow = new FrameBudget({ warmup: 30 });
     // Warm-up frames (shader compiles) are huge and must not count.
     expect(feed(slow, 200, 30)).toEqual(new Set(["sampling"]));
-    expect(feed(slow, 21, 89)).toEqual(new Set(["sampling"]));
-    expect(slow.push(21)).toBe("slow");
+    // A slow renderer on a 60 Hz display: some frames make the vsync, most miss it.
+    expect(feed(slow, 16.7, 9)).toEqual(new Set(["sampling"]));
+    expect(feed(slow, 22, 80)).toEqual(new Set(["sampling"]));
+    expect(slow.push(22)).toBe("slow");
 
     const fine = new FrameBudget({ warmup: 30 });
     feed(fine, 200, 30);
     feed(fine, 19, 89);
     expect(fine.push(19)).toBe("ok");
+  });
+
+  it("does not condemn a fast GPU on a 30 Hz display, whose every frame is 33 ms", () => {
+    const b = new FrameBudget({ warmup: 30 });
+    feed(b, 200, 30);
+    feed(b, 33.3, 89);
+    expect(b.push(33.3)).toBe("ok");
+    // A genuinely slow renderer on a 60 Hz display misses vsyncs: intervals well past the refresh.
+    const slow = new FrameBudget({ warmup: 30 });
+    feed(slow, 200, 30);
+    feed(slow, 16.7, 10);
+    feed(slow, 50, 79);
+    expect(slow.push(50)).toBe("slow");
   });
 
   it("uses the mean, so a few long frames do not condemn a fast device", () => {
@@ -87,7 +102,9 @@ describe("FrameBudget", () => {
 
   it("starts a fresh round after reset, warm-up included, and says done once judged ok", () => {
     const b = new FrameBudget({ warmup: 10 });
-    feed(b, 40, 99);
+    feed(b, 40, 10);
+    feed(b, 16.7, 5);
+    feed(b, 40, 84);
     expect(b.push(40)).toBe("slow");
     b.reset();
     expect(feed(b, 40, 10)).toEqual(new Set(["sampling"]));

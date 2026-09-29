@@ -304,6 +304,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const focus = new Vector3();
   const selectedSoma = new Vector3();
   const rideDir = new Vector3();
+  const heroNdc = new Vector3();
   // --- end r1/nav ---
   const heroNeuron = hero.neuron;
   // --- r1-audio: synthesised spatial sound, subscribed to the bus ---
@@ -446,7 +447,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     audio.update(dt); // r1-audio
     u.time.value = simTime;
     debug.hero.distanceUm = camera.position.distanceTo(hero.anchor.soma);
-    const ndc = hero.anchor.soma.clone().project(camera);
+    const ndc = heroNdc.copy(hero.anchor.soma).project(camera);
     debug.hero.screen = [((ndc.x + 1) / 2) * canvas.clientWidth, ((1 - ndc.y) / 2) * canvas.clientHeight];
     debug.simTime = simTime;
     debug.spikes = sim.stats.spikes;
@@ -484,12 +485,6 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   progress(1, "Ready");
   await renderer.setAnimationLoop(loop);
   // --- r1/nav ---
-  bus.emit("mode", {
-    gpu: sim.mode === "gpu",
-    neuronCount: data.neurons.count,
-    synapseCount: sim.synapses.count,
-    syntheticSynapses: sim.syntheticSynapses,
-  });
   if (opts.select === "hero") bus.emit("select", { neuron: hero.neuron });
   // --- end r1/nav ---
 

@@ -186,15 +186,16 @@ export class GpuSimulation {
         const drive = float(atomicLoad(input.element(i))).div(FIXED_ONE).toVar();
         atomicStore(input.element(i), int(0));
         const kick = stim.element(i).toVar();
-        stim.element(i).assign(0);
-        drive.addAssign(kick);
         const r = pcg(pcg(u.counter.bitXor(uint(seedHash))).add(i));
         If(float(r).mul(1 / 4294967296).lessThan(u.bgChance), () => {
           drive.addAssign(p.backgroundWeight);
         });
         If(u.t.lessThan(refractory.element(i)), () => {
+          // Refractory: the input is discarded but the stimulus stays queued (as in model.ts).
           v.element(i).assign(p.vReset);
         }).Else(() => {
+          stim.element(i).assign(0);
+          drive.addAssign(kick);
           const next = v.element(i).sub(p.vRest).mul(u.decay).add(p.vRest).add(drive).toVar();
           If(next.greaterThanEqual(p.vThreshold), () => {
             const h = head.element(i).toVar();
