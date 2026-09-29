@@ -41,7 +41,7 @@ import type { Stick } from "./camera/touch";
 // --- r3/tour: intro tour, home and jump flights, time control, screenshots ---
 import { Flight, poseAround, type Pose } from "./camera/goto";
 import { markTourSeen, readTourSeen } from "./prefs";
-import { Tour, shouldRunTour } from "./tour";
+import { Tour, introFade, shouldRunTour } from "./tour";
 import { captureFrame, downloadBlob, shotFilename } from "./screenshot";
 // --- end r3/tour
 // --- r3/links: shareable links ---
@@ -402,7 +402,13 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const restored = link ? decodeView(location.hash, data.neurons.count) : null;
   if (restored) placeCamera(restored);
   bus.on("select", () => link?.flush());
-  bus.on("tour", (e) => link?.pause(e.running));
+  // The tour's cameras are not links. When it ends, the sync resumes and re-bases on the resting view
+  // (in the loop, once a skip's flight to rest has landed), so a visitor who never moved keeps a clean URL.
+  let linkResume = false;
+  bus.on("tour", (e) => {
+    linkResume = !e.running;
+    if (e.running) link?.pause(true);
+  });
   // A link pasted into this tab's address bar changes only the hash, so the page does not reload.
   const onHashChange = () => {
     const v = decodeView(location.hash, data.neurons.count);
@@ -552,9 +558,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const startTour = () => {
     if (scripted) return;
     ride.cancel();
+    // Start first: it pauses the link sync, so the deselect below does not write a hash.
+    tour.start();
     bus.emit("select", { neuron: -1 });
     bus.emit("timeScale", { scale: 1 });
-    tour.start();
   };
   /** `?tour=1&t=N`: the tour on a fixed 60 Hz clock, held at N seconds. */
   const tourHoldAt = opts.tour && opts.holdAt !== undefined && !scripted ? opts.holdAt : null;
@@ -657,6 +664,8 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       if (tourHoldAt !== null) debug.settled = step === 0;
       simTime += step * timeScale;
       tour.update(step);
+      // The tour opens dim and fades up; after a skip the light returns over a second instead of jumping.
+      u.introFade.value = tour.running ? introFade(tour.time) : Math.min(1, u.introFade.value + step);
       // --- end r3/tour
       // --- r1/nav: the ride owns the camera while it runs, then a flight (r3/tour), FlyControls otherwise ---
       if (!ride.update(simTime, step) && !flight.update(step)) controls?.update(step);
@@ -711,7 +720,14 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       takeScreenshot();
     }
     // --- end r3/tour
-    link?.update(now); // r3/links
+    // --- r3/links ---
+    if (linkResume && !flight.active) {
+      linkResume = false;
+      link?.rebase();
+      link?.pause(false);
+    }
+    link?.update(now);
+    // --- end r3/links ---
 
     post.render();
     debug.frame++;

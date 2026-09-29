@@ -137,12 +137,37 @@ describe("LinkSync", () => {
     expect(writes).toHaveLength(1);
   });
 
-  it("flush still writes while paused, so Copy link is always current", () => {
+  it("flush is a no-op while paused, so a selection change during the tour writes nothing", () => {
     const { writes, sync, move } = setup();
     sync.update(0);
     sync.pause(true);
-    move({ z: 100 });
+    move({ z: 100, neuron: -1 });
     sync.flush();
+    expect(writes).toEqual([]);
+  });
+
+  it("flush before the first frame while paused takes no baseline", () => {
+    const { writes, sync } = setup();
+    sync.pause(true);
+    sync.flush();
+    sync.pause(false);
+    sync.update(0);
+    sync.update(5000);
+    expect(writes).toEqual([]);
+  });
+
+  it("rebase takes the resting view as the baseline, so a tour the visitor never moved after writes nothing", () => {
+    const { writes, sync, move } = setup();
+    sync.update(0);
+    sync.pause(true);
+    move({ x: 100, y: 5, z: 100 });
+    sync.update(9000);
+    sync.pause(false);
+    sync.rebase();
+    sync.update(12000);
+    expect(writes).toEqual([]);
+    move({ x: 200 });
+    sync.update(14100);
     expect(writes).toHaveLength(1);
   });
 });

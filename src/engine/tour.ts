@@ -43,6 +43,17 @@ export const TOUR = {
 } as const;
 export const TOUR_SECONDS = 20;
 
+/** The opening is dim and fades up to full brightness over this many tour seconds. */
+export const INTRO_FADE_SECONDS = 5;
+/** Brightness at tour time 0. */
+export const INTRO_FADE_FROM = 0.35;
+
+/** Scene brightness (the `introFade` uniform) at tour time `t`: a dark vast space that lights as you fall in. */
+export function introFade(t: number): number {
+  const k = Math.max(0, Math.min(1, t / INTRO_FADE_SECONDS));
+  return INTRO_FADE_FROM + (1 - INTRO_FADE_FROM) * k * k * (3 - 2 * k);
+}
+
 /** When each caption is on screen, [from, to) in tour seconds. The HUD fades them in and out. */
 export const CAPTION_WINDOWS: readonly (readonly [number, number])[] = [
   [0.8, 5.6],
@@ -65,7 +76,7 @@ export function tourCaptions(depthUm: number, coarse: boolean): [string, string,
 }
 
 export interface TourPoses {
-  /** Where the tour opens: far back, the hero one soma in front of the cluster. */
+  /** Where the tour opens: back and to the side of the cluster, high, looking at its centre, so structure fills the view. */
   wide: Pose;
   /** Behind the hero, looking out along its axon: close enough to watch its spike and the cascade after it. */
   hold: Pose;
@@ -84,8 +95,8 @@ function framePose(anchor: HeroAnchor, eye: [number, number, number], look: [num
 
 export function tourPoses(anchor: HeroAnchor): TourPoses {
   return {
-    // Far back along the axon's line, outside the cluster, looking in past the hero.
-    wide: framePose(anchor, [-480, 200, 110], [200, 0, 0]),
+    // Just outside the cluster, still framing it, looking at its centre rather than past the hero.
+    wide: framePose(anchor, [-260, 120, 80], [0, 0, 0]),
     // The resting composition mirrored across the axon: the spike runs away from the camera into the cluster.
     hold: framePose(anchor, [-105, -95, 38], [190, -10, -10]),
     rest: heroPath(0, anchor, { position: new Vector3(), target: new Vector3() }),

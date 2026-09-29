@@ -61,6 +61,8 @@ export function createSceneUniforms() {
     hazeDistance: uniform(125),
     hazeTint: uniform(new Color(0.07, 0.13, 0.32)),
     exposure: uniform(0.75),
+    /** Brightness of ribbons and somas, 1 normally. The intro tour ramps it up from dim (`introFade` in tour.ts). */
+    introFade: uniform(1),
     axonGain: uniform(0.7),
     /** Peak opacity of a ribbon; axons are thinner and far more numerous, so they get less. */
     opacity: uniform(0.6),
