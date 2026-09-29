@@ -5,6 +5,9 @@ import type { App } from "@/engine/app";
 import { describeNeuron, formatCount } from "@/engine/info";
 import { FOCUS, NeuronPanel, SummaryPanel, type PanelView } from "./panels";
 import { TouchPad } from "./touch-pad";
+// --- r3/cascade ---
+import { CascadePanel } from "./cascade";
+// --- end r3/cascade ---
 import { useCoarsePointer, useHudFrame, useMedia, useReducedMotion, useSelection, useStatus, type FrameSnap } from "./use-hud";
 
 const SHADOW = { textShadow: "0 0 6px #04060b, 0 0 2px #04060b" } as const;
@@ -247,6 +250,9 @@ export function Hud({ app }: { app: App }) {
         ) : (
           <SummaryPanel app={app} view={view} />
         )}
+        {/* --- r3/cascade */}
+        <CascadePanel app={app} selected={selected} />
+        {/* --- end r3/cascade */}
       </div>
 
       {aboutOpen ? null : (

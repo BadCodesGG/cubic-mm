@@ -36,6 +36,10 @@ import { AHEAD_UM, RideCamera } from "./camera/ride";
 import { createHudFrame, updateHudFrame, type HudFrame } from "./camera/view";
 import type { Stick } from "./camera/touch";
 // --- end r1/nav ---
+// --- r3/cascade ---
+import { CascadeTracker } from "./cascade";
+import { createCascadeLines } from "./scene/cascade";
+// --- end r3/cascade ---
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -69,6 +73,10 @@ export interface App {
   /** Touch pad input: left stick moves, right stick looks. */
   setSticks(move: Stick, look: Stick): void;
   // --- end r1/nav ---
+  // --- r3/cascade ---
+  /** What the last stimulus set off: hop counts, edges and a timeline. */
+  cascade: CascadeTracker;
+  // --- end r3/cascade ---
 }
 
 export interface CmmDebug {
@@ -109,6 +117,12 @@ export interface CmmDebug {
   selected: number;
   ride: string;
   // --- end r1/nav ---
+  // --- r3/cascade ---
+  /** The cascade tracker's summary, for checks. */
+  cascade?: () => import("./cascade").CascadeSummary;
+  /** Selects and stimulates a neuron, as a click and Space would. */
+  stimulate?: (neuron: number) => void;
+  // --- end r3/cascade ---
 }
 
 declare global {
@@ -257,6 +271,11 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     u.stimNeuron.value = neuron;
   };
   bus.on("stimulate", ({ neuron }) => stimulate(neuron));
+  // --- r3/cascade: reads stimulate, spike and arrive; "now" is the simulation clock (simTime, declared below) ---
+  const cascade = new CascadeTracker(bus, { clock: () => simTime, inhibitory: data.neurons.inhibitory });
+  const cascadeLines = createCascadeLines(data, cascade, u);
+  scene.add(cascadeLines.object);
+  // --- end r3/cascade ---
   const buildNeurons = (d: Dataset, pieces: Pieces): Neurons => {
     const built = createNeurons(d, u, pieces, { spikes: sim.spikeTimesSource, synapses: sim.synapses });
     scene.add(built.ribbons, built.somas, built.pulses);
@@ -341,6 +360,13 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     // --- end sim ---
     selected: -1,
     ride: "idle",
+    // --- r3/cascade: for scripts/shot.mjs --stimulate, which picks a well-connected cell ---
+    cascade: () => cascade.summary(),
+    stimulate: (neuron) => {
+      bus.emit("select", { neuron });
+      bus.emit("stimulate", { neuron });
+    },
+    // --- end r3/cascade ---
   };
   window.__cmm = debug;
 
@@ -437,7 +463,9 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     }
 
     // --- sim (r1/sim) ---
-    if (scripted && prevSimTime < HERO_STIMULUS_AT && simTime >= HERO_STIMULUS_AT) stimulate(hero.neuron);
+    // --- r3/cascade: through the bus, so the cascade tracker sees the scripted stimulus too ---
+    if (scripted && prevSimTime < HERO_STIMULUS_AT && simTime >= HERO_STIMULUS_AT) bus.emit("stimulate", { neuron: hero.neuron });
+    // --- end r3/cascade ---
     sim.step(simTime, simTime - prevSimTime);
     neurons.update();
     debug.sim!.spikes = sim.stats.spikes;
@@ -446,6 +474,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     // --- end sim ---
     audio.update(dt); // r1-audio
     u.time.value = simTime;
+    cascadeLines.update(simTime); // r3/cascade
     debug.hero.distanceUm = camera.position.distanceTo(hero.anchor.soma);
     const ndc = heroNdc.copy(hero.anchor.soma).project(camera);
     debug.hero.screen = [((ndc.x + 1) / 2) * canvas.clientWidth, ((1 - ndc.y) / 2) * canvas.clientHeight];
@@ -498,6 +527,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     cancelRide: () => ride.cancel(),
     setSticks: (move, look) => controls?.setSticks(move, look),
     // --- end r1/nav ---
+    cascade, // r3/cascade
     dispose() {
       // --- r1/nav ---
       ride.dispose();
@@ -512,6 +542,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       audio.dispose(); // r1-audio
       post.dispose();
       neurons.dispose();
+      // --- r3/cascade ---
+      cascade.dispose();
+      cascadeLines.dispose();
+      // --- end r3/cascade ---
       // --- sim (r1/sim) ---
       sim.dispose();
       bus.clear();
