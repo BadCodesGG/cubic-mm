@@ -37,7 +37,9 @@ describe("loadDataset against the committed data", () => {
       const { nodes, neurons, neuronNodeStart, neuronNodeCount, manifest } = ds;
 
       expect(ds.lod).toBe(lod);
-      expect(ds.synapses).toBeNull();
+      expect(ds.synapses).not.toBeNull();
+      expect(ds.synapses!.count).toBe(manifest.synapses!.count);
+      expect(ds.synapses!.neuronCount).toBe(manifest.neuronCount);
       expect(neurons.count).toBe(manifest.neuronCount);
       expect(nodes.count).toBe(manifest.lods[lod].nodeCount);
       expect(nodes.pos.length).toBe(nodes.count * 3);

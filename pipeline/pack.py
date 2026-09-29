@@ -1,31 +1,41 @@
-"""Pack the cached MICrONS skeletons into the binary layout in src/engine/format.ts.
+"""Pack the cached MICrONS skeletons and synapses into the binary layout in src/engine/format.ts.
 
     python pipeline/pack.py            # write public/data/
     python pipeline/pack.py --check    # re-pack in memory, exit 1 if public/data/ differs
 
-The output is a pure function of pipeline/cache/: fixed sort orders, no timestamps.
+The output is a pure function of pipeline/cache/: fixed sort orders, no timestamps. Skeletons are
+parsed and decimated in worker processes, but results are gathered in a fixed order.
 """
 
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
+import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
 import common as c
 
-# Per-LOD Ramer-Douglas-Peucker tolerance in micrometres. Both share the same maximum edge length,
-# which keeps the glow along pathDist smooth.
-LODS = {"hi": 0.75, "lite": 3.0}
-MAX_SEGMENT_UM = 12.0
+# Per-LOD (Ramer-Douglas-Peucker tolerance, maximum edge length, shortest terminal twig kept), all in
+# micrometres. Tuned so the whole set stays under NODE_BUDGET; the totals are printed on every pack.
+LODS = {"hi": (2.0, 28.0, 0.0), "lite": (8.0, 150.0, 50.0)}
+NODE_BUDGET = {"hi": 1_200_000, "lite": 350_000}
+FULL_RES_MAX_EDGE_UM = 12.0
 CHUNK_TARGET_BYTES = 1_500_000
 BYTES_PER_NODE = 4 + 6 + 2 + 2 + 1  # parent, pos, radius, pathDist, compartment
 NO_PARENT = 0xFFFFFFFF
 MAX_NODES = 65_535
+
+# A synapse further than this from every full-resolution axon node of its presynaptic neuron takes
+# the path distance of the nearest node of any compartment instead.
+AXON_MATCH_UM = 5.0
+SYNAPSE_VOXEL_NM = (4, 4, 40)
 
 SOMA, AXON, DENDRITE = 0, 1, 2
 SWC_TYPE_TO_COMPARTMENT = {1: SOMA, 2: AXON, 3: DENDRITE, 4: DENDRITE}
@@ -152,12 +162,12 @@ def parse_swc(path, root_id: int) -> Skeleton:
 
 
 def subdivide_long_edges(pos, rad, par, comp):
-    """Insert evenly spaced nodes into any original edge longer than MAX_SEGMENT_UM, so no LOD can
-    end up with a longer one. The new nodes take the child's compartment."""
+    """Insert evenly spaced nodes into any original edge longer than FULL_RES_MAX_EDGE_UM, so the
+    full-res skeleton has none. The new nodes take the child's compartment."""
     has_parent = par >= 0
     edge = np.zeros(len(pos))
     edge[has_parent] = np.linalg.norm(pos[has_parent] - pos[par[has_parent]], axis=1)
-    long_idx = np.flatnonzero(edge > MAX_SEGMENT_UM)
+    long_idx = np.flatnonzero(edge > FULL_RES_MAX_EDGE_UM)
     if len(long_idx) == 0:
         return pos, rad, par, comp
     new_pos, new_rad, new_comp = [], [], []
@@ -165,7 +175,7 @@ def subdivide_long_edges(pos, rad, par, comp):
     next_id = len(pos)
     for i in long_idx:
         p = par[i]
-        pieces = int(math.ceil(edge[i] / MAX_SEGMENT_UM))
+        pieces = int(math.ceil(edge[i] / FULL_RES_MAX_EDGE_UM))
         prev = p
         for k in range(1, pieces):
             t = k / pieces
@@ -226,7 +236,34 @@ class Decimated:
         return len(self.pos)
 
 
-def decimate(sk: Skeleton, tol: float) -> Decimated:
+def prune_twigs(sk: Skeleton, min_len: float) -> Skeleton:
+    """Drop every terminal branch (tip up to its branch point) shorter than `min_len`. One pass, so
+    a branch point left with a single child simply stops being a key node. Twigs that would take a
+    neurite all the way back to the soma are kept."""
+    if min_len <= 0:
+        return sk
+    n = len(sk.pos)
+    par = sk.parent
+    child_count = np.bincount(par[1:], minlength=n)
+    edge = np.zeros(n)
+    edge[1:] = np.linalg.norm(sk.pos[1:] - sk.pos[par[1:]], axis=1)
+    drop = np.zeros(n, dtype=bool)
+    for tip in np.flatnonzero(child_count == 0):
+        run, length, cur = [], 0.0, int(tip)
+        while cur != 0 and child_count[cur] <= 1:
+            run.append(cur)
+            length += edge[cur]
+            cur = int(par[cur])
+        if cur != 0 and length < min_len:
+            drop[run] = True
+    keep = ~drop
+    rank = np.cumsum(keep) - 1
+    new_parent = np.full(int(keep.sum()), -1, dtype=np.int64)
+    new_parent[1:] = rank[par[keep][1:]]
+    return Skeleton(sk.pos[keep], sk.radius[keep], new_parent, sk.comp[keep], sk.dist[keep])
+
+
+def decimate(sk: Skeleton, tol: float, max_len: float) -> Decimated:
     n = len(sk.pos)
     par = sk.parent
     child_count = np.bincount(par[1:], minlength=n)
@@ -249,7 +286,7 @@ def decimate(sk: Skeleton, tol: float) -> Decimated:
                 cur = int(only_child[cur])
                 run.append(cur)
             if len(run) > 2:
-                for j in rdp_interior(sk.pos[run], tol, MAX_SEGMENT_UM):
+                for j in rdp_interior(sk.pos[run], tol, max_len):
                     keep[run[j]] = True
 
     kept_idx = np.flatnonzero(keep)
@@ -319,6 +356,89 @@ def layer_of(cell: dict, bands: list[float]) -> int:
     return [1, 2, 4, 5, 6][sum(y >= b for b in bands)]
 
 
+# ------------------------------------------------------------------ synapses
+
+
+def load_synapse_rows(selected: list[int]) -> dict[str, np.ndarray] | None:
+    """Rows of pipeline/cache/synapses_selected.csv whose pre and post are both in `selected`, or
+    None if synapses.py has not produced a complete file for (a superset of) this selection."""
+    if not (c.SYNAPSES_CSV.exists() and c.SYNAPSES_STATE.exists()):
+        return None
+    state = json.loads(c.SYNAPSES_STATE.read_text())
+    if not state["done"]:
+        return None
+    if not set(selected) <= set(state["rootIds"]):
+        raise ValueError("synapses_selected.csv was built for a different selection; rerun synapses.py")
+    keep = set(selected)
+    ids, pre, post, xyz, size = [], [], [], [], []
+    with c.SYNAPSES_CSV.open(newline="") as f:
+        reader = csv.reader(f)
+        next(reader)
+        for row in reader:
+            a, b = int(row[1]), int(row[2])
+            if a in keep and b in keep:
+                ids.append(int(row[0]))
+                pre.append(a)
+                post.append(b)
+                xyz.append((float(row[3]), float(row[4]), float(row[5])))
+                size.append(float(row[6]))
+    return {
+        "id": np.array(ids, dtype=np.int64),
+        "pre": np.array(pre, dtype=np.int64),
+        "post": np.array(post, dtype=np.int64),
+        "um": np.array(xyz, dtype=np.float64).reshape(-1, 3) * (np.array(SYNAPSE_VOXEL_NM) / 1000.0),
+        "size": np.array(size, dtype=np.float64),
+    }
+
+
+def nearest_node(points: np.ndarray, nodes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Index into `nodes` of the closest node to each point, and that distance. Plain broadcasting
+    rather than a matmul trick, so ties resolve the same way on every machine."""
+    idx = np.empty(len(points), dtype=np.int64)
+    dist = np.empty(len(points))
+    step = max(1, 1_000_000 // len(nodes))
+    for i in range(0, len(points), step):
+        d2 = ((points[i : i + step, None, :] - nodes[None, :, :]) ** 2).sum(axis=2)
+        j = d2.argmin(axis=1)
+        idx[i : i + step] = j
+        dist[i : i + step] = np.sqrt(d2[np.arange(len(j)), j])
+    return idx, dist
+
+
+def pre_path_dist(sk: Skeleton, synapse_um: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Path length from the soma (um) to the full-res axon node nearest each synapse, and a mask of
+    the synapses that had no axon node within AXON_MATCH_UM and used the nearest node of any
+    compartment instead."""
+    axon = np.flatnonzero(sk.comp == AXON)
+    idx, dist = nearest_node(synapse_um, sk.pos[axon])
+    path = sk.dist[axon[idx]]
+    far = dist > AXON_MATCH_UM
+    if far.any():
+        any_idx, _ = nearest_node(synapse_um[far], sk.pos)
+        path[far] = sk.dist[any_idx]
+    return path, far
+
+
+# ------------------------------------------------------------------ per-neuron work (in workers)
+
+
+def process_neuron(job: tuple[int, np.ndarray | None]) -> dict:
+    """Parse one skeleton, decimate it per LOD and, when it has synapses, place them on its axon."""
+    root_id, synapse_um = job
+    sk = parse_swc(c.SWC_DIR / f"{root_id}.swc", root_id)
+    out = {
+        "root": root_id,
+        "soma": sk.pos[0].copy(),
+        "axonNodes": int((sk.comp == AXON).sum()),
+        "decimated": {name: decimate(prune_twigs(sk, twig), tol, cap) for name, (tol, cap, twig) in LODS.items()},
+        "preDist": None,
+        "fallback": None,
+    }
+    if synapse_um is not None and len(synapse_um) and out["axonNodes"]:
+        out["preDist"], out["fallback"] = pre_path_dist(sk, synapse_um)
+    return out
+
+
 # ------------------------------------------------------------------ the pack
 
 
@@ -331,10 +451,15 @@ def pack(log=print) -> dict[str, bytes]:
 
     selected = json.loads(c.SELECTION.read_text())["rootIds"]
     lo, hi = c.BOUNDS_UM
-    skeletons = {r: parse_swc(c.SWC_DIR / f"{r}.swc", r) for r in selected}
+
+    rows = load_synapse_rows(selected)
+    by_pre = {r: np.flatnonzero(rows["pre"] == r) for r in selected} if rows is not None else {}
+    jobs = [(r, rows["um"][by_pre[r]] if rows is not None else None) for r in selected]
+    with ProcessPoolExecutor(min(os.cpu_count() or 1, 12)) as pool:
+        results = {res["root"]: res for res in pool.map(process_neuron, jobs, chunksize=8)}
 
     def soma_key(r: int) -> tuple[int, int]:
-        q = quantise(skeletons[r].pos[:1], lo, hi)[0]
+        q = quantise(results[r]["soma"][None, :], lo, hi)[0]
         return (morton(int(q[0]), int(q[1]), int(q[2])), r)
 
     order = sorted(selected, key=soma_key)
@@ -349,19 +474,22 @@ def pack(log=print) -> dict[str, bytes]:
 
     neurons = Writer(8)
     neurons.u64(np.array(order, dtype=np.uint64))
-    neurons.f32(np.array([skeletons[r].pos[0] for r in order], dtype=np.float32))
+    neurons.f32(np.array([results[r]["soma"] for r in order], dtype=np.float32))
     neurons.u8(np.array([type_index[cells[r]["cell_type"]] for r in order]))
     neurons.u8(np.array([cells[r]["broad_type"] == "inhibitory" for r in order]))
     neurons.u8(np.array([layer_of(cells[r], bands) for r in order]))
     files["neurons.bin"] = neurons.finish(b"CMN1" + u32le(n_neurons))
 
-    decimated = {name: [decimate(skeletons[r], tol) for r in order] for name, tol in LODS.items()}
+    decimated = {name: [results[r]["decimated"][name] for r in order] for name in LODS}
     for name, per_neuron in decimated.items():
         counts = np.array([d.count for d in per_neuron])
         if counts.max() >= MAX_NODES:
             raise ValueError(f"{name}: a neuron has {counts.max()} nodes")
-        log(f"{name}: {counts.sum()} nodes over {n_neurons} neurons "
-            f"(min {counts.min()}, median {int(np.median(counts))}, max {counts.max()})")
+        tol, cap, twig = LODS[name]
+        log(f"{name} (tolerance {tol} um, max edge {cap} um, twigs under {twig} um dropped): {counts.sum():,} nodes over {n_neurons} neurons "
+            f"(min {counts.min()}, median {int(np.median(counts))}, max {counts.max()}); budget {NODE_BUDGET[name]:,}")
+        if n_neurons > 1000 and counts.sum() > NODE_BUDGET[name]:
+            raise ValueError(f"{name}: {counts.sum():,} nodes is over the {NODE_BUDGET[name]:,} budget; raise its tolerance in LODS")
 
     # Group neurons into chunks by hi node bytes; lite reuses the grouping.
     groups: list[list[int]] = [[]]
@@ -422,6 +550,10 @@ def pack(log=print) -> dict[str, bytes]:
         size = sum(len(v) for k, v in files.items() if k.startswith(f"chunks/{name}/"))
         log(f"{name}: {len(chunks)} chunks, {size:,} bytes")
 
+    synapse_info = None
+    if rows is not None:
+        files["synapses.bin"], synapse_info = pack_synapses(rows, results, order, lo, hi, log)
+
     manifest = {
         "version": 1,
         "boundsUm": {"min": lo, "max": hi},
@@ -429,12 +561,69 @@ def pack(log=print) -> dict[str, bytes]:
         "cellTypes": cell_types,
         "neurons": "neurons.bin",
         "lods": lods_manifest,
-        "synapses": None,
+        "synapses": synapse_info,
         "credits": CREDITS,
     }
     files["manifest.json"] = (json.dumps(manifest, indent=2) + "\n").encode()
     log(f"neurons.bin: {len(files['neurons.bin']):,} bytes; manifest.json: {len(files['manifest.json']):,} bytes")
     return files
+
+
+def pack_synapses(rows, results, order, lo, hi, log) -> tuple[bytes, dict]:
+    index_of = {r: i for i, r in enumerate(order)}
+    n_neurons = len(order)
+    n_rows = len(rows["id"])
+    pre_idx = np.array([index_of[r] for r in rows["pre"]], dtype=np.int64)
+    post_idx = np.array([index_of[r] for r in rows["post"]], dtype=np.int64)
+
+    # Path distance to the pre neuron's axon, gathered back from the per-neuron results (which
+    # were computed against that neuron's rows in file order).
+    pre_dist = np.zeros(n_rows)
+    has_axon = np.zeros(n_rows, dtype=bool)
+    fallback = np.zeros(n_rows, dtype=bool)
+    for r in order:
+        res = results[r]
+        if res["preDist"] is None:
+            continue
+        sel = np.flatnonzero(rows["pre"] == r)
+        pre_dist[sel] = res["preDist"]
+        fallback[sel] = res["fallback"]
+        has_axon[sel] = True
+    dropped = int((~has_axon).sum())
+    keep = np.flatnonzero(has_axon)
+    if len(keep) == 0:
+        raise ValueError("no synapse has a presynaptic axon")
+
+    ids, pre_idx, post_idx = rows["id"][keep], pre_idx[keep], post_idx[keep]
+    um, size, pre_dist, fallback = rows["um"][keep], rows["size"][keep], pre_dist[keep], fallback[keep]
+
+    outside = int(((um < np.array(lo)) | (um > np.array(hi))).any(axis=1).sum())
+    um = np.clip(um, lo, hi)
+    pos_q = quantise(um, lo, hi)
+    dist_q = np.floor(pre_dist * 4 + 0.5)
+    if dist_q.max() > 65535:
+        raise ValueError("a presynaptic path distance exceeds the u16 quarter-um range")
+    size_q = np.floor(255 * np.log1p(size) / np.log1p(size.max()) + 0.5)
+
+    order_by = np.lexsort((ids, pre_idx))  # by pre neuron, then by synapse id: a fixed order
+    pre_sorted = pre_idx[order_by]
+    offsets = np.searchsorted(pre_sorted, np.arange(n_neurons + 1), side="left")
+
+    w = Writer(12)
+    w.u32(offsets)
+    w.u16(pre_sorted)
+    w.u16(post_idx[order_by])
+    w.u16(pos_q[order_by].reshape(-1))
+    w.u16(dist_q[order_by])
+    w.u8(size_q[order_by])
+    count = len(keep)
+    data = w.finish(b"CMS1" + u32le(count, n_neurons))
+    log(f"synapses: {n_rows:,} between selected neurons; {dropped:,} dropped (presynaptic neuron has no axon "
+        f"nodes); {count:,} packed; {int(fallback.sum()):,} placed on the nearest "
+        f"non-axon node (no axon within {AXON_MATCH_UM} um); {int((pre_idx == post_idx).sum()):,} autapses kept; "
+        f"{outside:,} clamped into the bounds; size max {size.max():,.0f}")
+    log(f"synapses.bin: {len(data):,} bytes")
+    return data, {"file": "synapses.bin", "count": count}
 
 
 def existing_files() -> dict[str, bytes]:
