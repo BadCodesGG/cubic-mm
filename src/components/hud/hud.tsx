@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { App } from "@/engine/app";
 import { describeNeuron, formatCount } from "@/engine/info";
 import { FOCUS, NeuronPanel, SummaryPanel } from "./panels";
@@ -14,12 +14,18 @@ function StatusLine({ app }: { app: App }) {
   const parts = [
     `${formatCount(s.neurons)} neurons`,
     s.synapses !== null ? `${formatCount(s.synapses)} synapses` : null,
-    s.gpu ? "WebGPU" : "WebGL2 lite",
+    [s.gpu ? "WebGPU" : "WebGL2", s.tier].filter(Boolean).join(" "),
     s.frameMs > 0 ? `${s.frameMs.toFixed(1)} ms` : null,
   ].filter(Boolean);
   return (
     <p className="mt-1 font-mono text-[11px] tracking-wide text-slate-400" style={SHADOW}>
-      {parts.join(" · ")}
+      {parts.map((part, i) => (
+        <Fragment key={i}>
+          {/* A no-break space before the dot: a wrapped line ends on a separator, never starts on one. */}
+          {i > 0 ? " · " : null}
+          <span className="whitespace-nowrap">{part}</span>
+        </Fragment>
+      ))}
     </p>
   );
 }
@@ -133,7 +139,8 @@ function Hint({ coarse }: { coarse: boolean }) {
   if (phase === "gone") return null;
   return (
     <p
-      className={`pointer-events-none absolute inset-x-0 top-16 mx-auto w-fit max-w-[92vw] rounded-full bg-[#04060b]/60 px-4 py-1.5 text-center text-[12px] tracking-wide text-slate-200 backdrop-blur-sm transition-opacity duration-1000 md:top-5 pointer-coarse:top-20 ${
+      data-hud-panel="hint"
+      className={`pointer-events-none absolute inset-x-0 top-16 mx-auto w-fit max-w-[92vw] rounded-full bg-[#04060b]/60 px-4 py-1.5 text-center text-[12px] tracking-wide text-slate-200 backdrop-blur-sm transition-opacity duration-1000 md:top-5 pointer-coarse:top-28 ${
         phase === "fading" ? "opacity-0" : "opacity-100"
       }`}
     >
@@ -179,18 +186,21 @@ export function Hud({ app }: { app: App }) {
       <div aria-hidden="true" className="absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-[#04060b]/75 to-transparent" />
       <Markers app={app} frame={frame} selected={selected} />
 
-      <header className="absolute left-5 top-5">
+      {/* On a narrow screen the status wraps short of the About and sound buttons in the corner. */}
+      <header data-hud-panel="status" className="absolute left-5 right-40 top-5 sm:right-auto">
         <h1 className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-200" style={SHADOW}>
           One Cubic Millimetre
         </h1>
         <StatusLine app={app} />
       </header>
 
-      <div className="absolute right-4 top-4">
+      <div data-hud-panel="about" className="absolute right-4 top-4">
         <About app={app} />
       </div>
 
-      <div className="pointer-events-auto absolute bottom-5 left-5 rounded-[4px] border-l border-cyan-200/25 bg-[#04060b]/60 py-2 pl-3.5 pr-3 backdrop-blur-sm pointer-coarse:bottom-44">
+      <div
+        data-hud-panel="cell"
+        className="pointer-events-auto absolute bottom-5 left-5 rounded-[4px] border-l border-cyan-200/25 bg-[#04060b]/60 py-2 pl-3.5 pr-3 backdrop-blur-sm pointer-coarse:bottom-44">
         {selected >= 0 ? (
           <NeuronPanel app={app} neuron={selected} ride={frame.ride} rideNeuron={frame.rideNeuron} />
         ) : (
@@ -198,7 +208,7 @@ export function Hud({ app }: { app: App }) {
         )}
       </div>
 
-      <div className="absolute bottom-6 right-6 pointer-coarse:bottom-auto pointer-coarse:right-4 pointer-coarse:top-32">
+      <div data-hud-panel="scale" className="absolute bottom-6 right-6 pointer-coarse:bottom-auto pointer-coarse:right-4 pointer-coarse:top-44">
         <ScaleAndCompass frame={frame} />
       </div>
 

@@ -23,14 +23,25 @@ export function createSceneUniforms() {
     spikeColor: uniform(new Color(1.0, 0.6, 0.28)),
     spikeGain: uniform(9),
     afterglowGain: uniform(0.18),
-    /** The soma holds its glow longer and brighter than the axon, like a calcium transient. */
-    somaAfterglowGain: uniform(0.35),
-    somaAfterglow: uniform(0.9),
+    /** The soma holds its glow longer than the axon, like a calcium transient, but briefly. */
+    somaAfterglowGain: uniform(0.25),
+    somaAfterglow: uniform(0.4),
     /**
-     * View depth at which spike light has halved, µm, on top of the haze: background spikes
-     * across the volume stay a faint shimmer and a cascade near the visitor is what reads.
+     * View depth at which spike light has halved, µm, on top of the haze. It falls with the fourth
+     * power of depth beyond that, so background spikes across the volume stay a faint shimmer and
+     * only the few near the visitor read, like distant lightning.
      */
-    spikeNearUm: uniform(130),
+    spikeNearUm: uniform(60),
+    /** The same for the stimulated neuron (`stimNeuron`), with a gentler square falloff: its cascade stays bright. */
+    cascadeNearUm: uniform(130),
+    /** Neuron most recently stimulated (by the visitor or the scripted hero), or -1. Written by app.ts. */
+    stimNeuron: uniform(-1),
+    /**
+     * Largest half-width, device px, of spike light: the glowing core of a thick ribbon and the
+     * glow of a soma or a point of light. Up close they stay a bright line or point rather than
+     * filling the view with a blurred blob. app.ts scales it with the pixel ratio.
+     */
+    glowCapPx: uniform(12),
     /** Radius of the point of light riding the pulse front on each axon, µm. */
     pulseSpriteUm: uniform(2.6),
     pulseSpriteGain: uniform(7),

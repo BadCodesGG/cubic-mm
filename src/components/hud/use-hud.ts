@@ -96,15 +96,18 @@ export interface Status {
   neurons: number;
   synapses: number | null;
   frameMs: number;
+  /** Render tier now drawn ("hi" or "lite"); it can drop while running on auto. */
+  tier: string | null;
 }
 
-/** Neuron and synapse counts and backend from the `mode` event, frame time from `window.__cmm` twice a second. */
+/** Neuron and synapse counts and backend from the `mode` event, frame time and tier from `window.__cmm` twice a second. */
 export function useStatus(app: App): Status {
   const [status, setStatus] = useState<Status>(() => ({
     gpu: window.__cmm?.isWebGPU ?? false,
     neurons: app.data.neurons.count,
     synapses: app.data.synapses ? app.data.synapses.count : null,
     frameMs: window.__cmm?.frameMs ?? 0,
+    tier: window.__cmm?.quality.tier ?? null,
   }));
   useEffect(() => {
     const off = app.bus.on("mode", (m) =>
@@ -112,7 +115,8 @@ export function useStatus(app: App): Status {
     );
     const id = window.setInterval(() => {
       const ms = window.__cmm?.frameMs ?? 0;
-      setStatus((s) => (Math.abs(s.frameMs - ms) < 0.05 ? s : { ...s, frameMs: ms }));
+      const tier = window.__cmm?.quality.tier ?? null;
+      setStatus((s) => (Math.abs(s.frameMs - ms) < 0.05 && s.tier === tier ? s : { ...s, frameMs: ms, tier }));
     }, 500);
     return () => {
       off();

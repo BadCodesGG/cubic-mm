@@ -8,7 +8,10 @@ export type Motion = "auto" | "on";
 export type Audio = "on" | "off";
 
 export interface Prefs {
-  /** "lite" forces the WebGL2 path; "hi" and "auto" let the renderer choose. */
+  /**
+   * "hi" and "lite" pin the render level (see quality.ts); "auto" picks one from the device and
+   * steps it down while frames run slow. The backend (WebGPU or WebGL2) is chosen separately.
+   */
   quality: Quality;
   /** "on" plays the volume even when the OS asks for reduced motion. */
   motion: Motion;
