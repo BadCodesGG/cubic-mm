@@ -571,7 +571,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     if (e instanceof KeyboardEvent && (MODIFIERS.has(e.code) || e.ctrlKey || e.metaKey || e.altKey)) return;
     e.stopPropagation();
     if (e.type === "keydown") e.preventDefault();
-    if (e.type === "pointerdown") swallowClickUntil = performance.now() + 1000;
+    if (e.type === "pointerdown" || e.type === "touchstart") swallowClickUntil = performance.now() + 1000;
     tour.skip();
   };
   const TOUR_INPUT = ["keydown", "pointerdown", "click", "wheel", "touchstart"] as const;
