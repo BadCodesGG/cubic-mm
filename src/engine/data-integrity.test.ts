@@ -6,6 +6,7 @@ import {
   NO_PARENT,
   decodeChunk,
   decodeNeurons,
+  decodeSynapses,
   dequantise,
   parseManifest,
   type Chunk,
@@ -29,8 +30,11 @@ const manifest = parseManifest(JSON.parse(readFileSync(DATA + "manifest.json", "
 const neurons = decodeNeurons(read(manifest.neurons));
 const { min, max } = manifest.boundsUm;
 
-/** Edge length limit from the packer plus room for two quantisation half-steps per end. */
-const MAX_EDGE_UM = 12 + 0.25;
+/** Per-LOD edge length caps from `LODS` in the packer, plus room for two quantisation half-steps per end. */
+const MAX_EDGE_UM: Record<LodName, number> = { hi: 28 + 0.25, lite: 150 + 0.25 };
+
+/** The node budgets the packer enforces for the full set. */
+const NODE_BUDGET: Record<LodName, number> = { hi: 1_200_000, lite: 350_000 };
 
 function dequantisedPoint(chunk: Chunk, local: number): number[] {
   return [0, 1, 2].map((k) => dequantise(chunk.pos[local * 3 + k], min[k], max[k]));
@@ -75,6 +79,13 @@ describe("public/data", () => {
         expect(chunks.reduce((s, c) => s + c.neurons.length, 0)).toBe(manifest.neuronCount);
       });
 
+      it("stays under the node budget and gives every neuron at least one node", () => {
+        if (manifest.neuronCount > 1000) expect(info.nodeCount).toBeLessThanOrEqual(NODE_BUDGET[lod]);
+        for (const chunk of chunks) {
+          for (const n of chunk.neurons) expect(n.nodeCount).toBeGreaterThanOrEqual(1);
+        }
+      });
+
       it("keeps every neuron a soma-rooted tree with parents first and pathDist rising", () => {
         const seen = new Set<number>();
         for (const chunk of chunks) {
@@ -101,7 +112,7 @@ describe("public/data", () => {
         expect(seen.size).toBe(manifest.neuronCount);
       });
 
-      it("places nodes inside the bounds, the soma on the table, and no edge over 12 um", () => {
+      it(`places nodes inside the bounds, the soma on the table, and no edge over ${MAX_EDGE_UM[lod] - 0.25} um`, () => {
         info.chunks.forEach((c, i) => {
           const chunk = chunks[i];
           for (const n of chunk.neurons) {
@@ -112,8 +123,8 @@ describe("public/data", () => {
             for (let g = n.nodeStart + 1; g < n.nodeStart + n.nodeCount; g++) {
               const a = dequantisedPoint(chunk, g - chunk.nodeStart);
               const b = dequantisedPoint(chunk, chunk.parent[g - chunk.nodeStart] - chunk.nodeStart);
-              if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > MAX_EDGE_UM) {
-                throw new Error(`${lod}: neuron ${n.neuronIndex} node ${g} is more than ${MAX_EDGE_UM} um from its parent`);
+              if (Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) > MAX_EDGE_UM[lod]) {
+                throw new Error(`${lod}: neuron ${n.neuronIndex} node ${g} is more than ${MAX_EDGE_UM[lod]} um from its parent`);
               }
             }
           }
@@ -135,6 +146,76 @@ describe("public/data", () => {
       });
     });
   }
+
+  describe("synapses", () => {
+    const info = manifest.synapses;
+    const table = info ? decodeSynapses(read(info.file)) : null;
+    const hiChunks = manifest.lods.hi.chunks.map((c) => decodeChunk(read(c.file)));
+
+    /** Largest pathDistQ of each neuron in the hi LOD. */
+    const maxPathQ = new Uint16Array(manifest.neuronCount);
+    for (const chunk of hiChunks) {
+      for (const n of chunk.neurons) {
+        for (let g = n.nodeStart; g < n.nodeStart + n.nodeCount; g++) {
+          maxPathQ[n.neuronIndex] = Math.max(maxPathQ[n.neuronIndex], chunk.pathDistQ[g - chunk.nodeStart]);
+        }
+      }
+    }
+
+    it("is listed in the manifest and agrees with its header", () => {
+      expect(info).not.toBeNull();
+      expect(table!.count).toBe(info!.count);
+      expect(table!.neuronCount).toBe(manifest.neuronCount);
+      expect(table!.count).toBeGreaterThan(0);
+    });
+
+    it("points every synapse at real neurons", () => {
+      for (let i = 0; i < table!.count; i++) {
+        if (table!.pre[i] >= neurons.count || table!.post[i] >= neurons.count) {
+          throw new Error(`synapse ${i} references neuron ${table!.pre[i]} -> ${table!.post[i]} of ${neurons.count}`);
+        }
+      }
+    });
+
+    it("is sorted by pre with preOffsets indexing the runs", () => {
+      const { preOffsets, pre, count } = table!;
+      expect(preOffsets.length).toBe(manifest.neuronCount + 1);
+      expect(preOffsets[0]).toBe(0);
+      expect(preOffsets[manifest.neuronCount]).toBe(count);
+      for (let n = 0; n < manifest.neuronCount; n++) {
+        const start = preOffsets[n];
+        const end = preOffsets[n + 1];
+        if (end < start) throw new Error(`preOffsets falls at neuron ${n}`);
+        for (let i = start; i < end; i++) {
+          if (pre[i] !== n) throw new Error(`synapse ${i} has pre ${pre[i]}, inside neuron ${n}'s run`);
+        }
+      }
+      // Runs cover every synapse exactly once, so no synapse of pre n sits outside its run.
+      let runTotal = 0;
+      for (let n = 0; n < manifest.neuronCount; n++) runTotal += preOffsets[n + 1] - preOffsets[n];
+      expect(runTotal).toBe(count);
+    });
+
+    it("keeps positions in bounds and preDistQ within the neuron's hi path length", () => {
+      const { pre, pos, preDistQ, count } = table!;
+      for (let i = 0; i < count; i++) {
+        for (let k = 0; k < 3; k++) {
+          const v = dequantise(pos[i * 3 + k], min[k], max[k]);
+          if (v < min[k] - 1e-9 || v > max[k] + 1e-9) throw new Error(`synapse ${i} is outside the bounds`);
+        }
+        if (preDistQ[i] > maxPathQ[pre[i]] + 1) {
+          throw new Error(`synapse ${i}: preDistQ ${preDistQ[i]} exceeds neuron ${pre[i]}'s longest path ${maxPathQ[pre[i]]}`);
+        }
+      }
+    });
+
+    it("uses the whole size scale, largest bucket 255", () => {
+      const { size, count } = table!;
+      let biggest = 0;
+      for (let i = 0; i < count; i++) biggest = Math.max(biggest, size[i]);
+      expect(biggest).toBe(255);
+    });
+  });
 
   it("groups the same neurons into the same chunks in both LODs", () => {
     const groups = (lod: LodName) =>
