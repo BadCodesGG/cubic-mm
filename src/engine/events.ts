@@ -27,6 +27,16 @@ export interface EventMap {
   rideJump: { fromNeuron: number; neuron: number; time: number };
   /** Pulse front arrived at a synapse. Fired by the simulation for the audio layer, rate-limited by the emitter. */
   arrive: { pre: number; post: number; synapse: number; time: number };
+  /** Fly the camera to look at a neuron (search, minimap, links). Fired by the HUD. */
+  jump: { neuron: number };
+  /** Fly the camera back to the starting view. Fired by the HUD or the `H` key. */
+  home: Record<string, never>;
+  /** Simulation speed: 1 is normal, 0 is paused, 0.1 is slow motion. Fired by the HUD. */
+  timeScale: { scale: number };
+  /** The intro tour started or ended. Fired by the tour. */
+  tour: { running: boolean };
+  /** Capture the current frame at high resolution. Fired by the HUD or the `P` key. */
+  screenshot: Record<string, never>;
   /** Simulation mode changed (WebGPU compute or CPU worker). */
   mode: {
     gpu: boolean;
