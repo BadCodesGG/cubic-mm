@@ -28,7 +28,13 @@ export interface EventMap {
   /** Pulse front arrived at a synapse. Fired by the simulation for the audio layer, rate-limited by the emitter. */
   arrive: { pre: number; post: number; synapse: number; time: number };
   /** Simulation mode changed (WebGPU compute or CPU worker). */
-  mode: { gpu: boolean; neuronCount: number; synapseCount: number };
+  mode: {
+    gpu: boolean;
+    neuronCount: number;
+    synapseCount: number;
+    /** True when the wiring is the Peters'-rule stand-in (`sim/peters.ts`), not the dataset's own table. */
+    syntheticSynapses?: boolean;
+  };
 }
 
 export type Handler<T> = (payload: T) => void;

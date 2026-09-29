@@ -8,6 +8,7 @@
 
 import { FORMAT_VERSION, NO_PARENT, PATH_DIST_UNIT_UM, quantise, type Bounds, type Manifest } from "./format";
 import type { Dataset, NodeArrays } from "./data";
+import { petersSynapses } from "./sim/peters";
 
 const SOMA = 0;
 const AXON = 1;
@@ -273,7 +274,7 @@ function buildNeuron(nb: NeuronBuilder, soma: Vec3, inhibitory: boolean, r: () =
   );
 }
 
-/** Builds `neuronCount` random neurons (about 2,500 nodes each) inside a 1000 x 800 x 500 µm box. */
+/** Builds `neuronCount` random neurons (about 2,500 nodes each) inside a 1000 x 800 x 500 µm box, wired by Peters' rule. */
 export function synthDataset(seed: number, neuronCount: number): Dataset {
   const r = rng(seed);
   const builders: NeuronBuilder[] = [];
@@ -348,7 +349,7 @@ export function synthDataset(seed: number, neuronCount: number): Dataset {
     },
   };
 
-  return {
+  const data: Dataset = {
     manifest,
     lod: "hi",
     neurons: { count: neuronCount, rootId, somaUm, cellType, inhibitory, layer },
@@ -357,4 +358,8 @@ export function synthDataset(seed: number, neuronCount: number): Dataset {
     neuronNodeCount,
     synapses: null,
   };
+  // Wired by Peters' rule (see sim/peters.ts), on its own RNG stream so the geometry above does
+  // not change. The manifest still says `synapses: null`: there is no file behind this table.
+  data.synapses = petersSynapses(data, rng(seed ^ 0x5eed));
+  return data;
 }

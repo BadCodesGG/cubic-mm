@@ -14,16 +14,30 @@ export function createSceneUniforms() {
      * whole cube in about 2 ms, far too fast to see travel; 1000x makes it about 2 s.
      */
     slowMo: uniform(1000),
-    /** Width of the travelling pulse, seconds of display time. */
-    pulseWidth: uniform(0.06),
-    /** Decay time of the afterglow left behind the pulse, seconds. */
-    afterglow: uniform(0.25),
+    /** Synaptic delay added on top of the travel time before a pulse lands, seconds. */
+    synDelay: uniform(0.001),
+    /** Width of the travelling pulse head (a Gaussian in time), seconds of display time. */
+    pulseWidth: uniform(0.025),
+    /** Decay time of the short tail left behind the pulse head, seconds. */
+    afterglow: uniform(0.12),
     spikeColor: uniform(new Color(1.0, 0.6, 0.28)),
     spikeGain: uniform(9),
-    afterglowGain: uniform(0.35),
+    afterglowGain: uniform(0.18),
     /** The soma holds its glow longer and brighter than the axon, like a calcium transient. */
-    somaAfterglowGain: uniform(0.6),
+    somaAfterglowGain: uniform(0.35),
     somaAfterglow: uniform(0.9),
+    /**
+     * View depth at which spike light has halved, µm, on top of the haze: background spikes
+     * across the volume stay a faint shimmer and a cascade near the visitor is what reads.
+     */
+    spikeNearUm: uniform(130),
+    /** Radius of the point of light riding the pulse front on each axon, µm. */
+    pulseSpriteUm: uniform(2.6),
+    pulseSpriteGain: uniform(7),
+    /** Radius, brightness and decay (s) of the glow on the dendrite where a pulse lands. */
+    synapseGlowUm: uniform(1.8),
+    synapseGlowGain: uniform(0.8),
+    synapseGlowDecay: uniform(0.12),
 
     /** projectionMatrix[1][1] * drawing-buffer height / 2: multiply by 1/depth for px per µm. */
     pixelScale: uniform(1000),
