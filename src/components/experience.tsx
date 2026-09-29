@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import AudioToggle from "./audio-toggle";
 
 interface LoadState {
   fraction: number;
@@ -86,6 +87,8 @@ export default function Experience() {
           WebGL2 lite mode
         </div>
       ) : null}
+
+      <AudioToggle />
 
       <p className="pointer-events-none absolute bottom-5 left-6 max-w-[80vw] text-[12px] tracking-wide text-slate-400/75">
         <span className="text-slate-200/90">One Cubic Millimetre</span>
