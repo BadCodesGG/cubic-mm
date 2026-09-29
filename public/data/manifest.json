@@ -12,137 +12,471 @@
       1116.16
     ]
   },
-  "neuronCount": 200,
+  "neuronCount": 1711,
   "cellTypes": [
+    "",
     "23P",
     "4P",
+    "5P-ET",
     "5P-IT",
+    "5P-NP",
+    "6P-CT",
+    "6P-IT",
+    "6P-U",
     "BC",
     "BPC",
-    "MC"
+    "MC",
+    "NGC"
   ],
   "neurons": "neurons.bin",
   "lods": {
     "hi": {
-      "nodeCount": 281508,
+      "nodeCount": 1163122,
       "chunks": [
         {
           "file": "chunks/hi/0.bin",
           "nodeStart": 0,
-          "nodeCount": 99002,
-          "neuronCount": 74,
+          "nodeCount": 99427,
+          "neuronCount": 147,
           "bboxUm": {
             "min": [
-              366.825,
-              336.645,
+              294.128,
+              305.162,
               593.998
             ],
             "max": [
-              1592.225,
-              1091.675,
+              1563.443,
+              1112.576,
               1114.283
             ]
           }
         },
         {
           "file": "chunks/hi/1.bin",
-          "nodeStart": 99002,
-          "nodeCount": 99007,
-          "neuronCount": 66,
+          "nodeStart": 99427,
+          "nodeCount": 99337,
+          "neuronCount": 149,
           "bboxUm": {
             "min": [
-              400.782,
-              317.549,
+              321.065,
+              291.61,
               593.998
             ],
             "max": [
-              1444.205,
-              1120.012,
-              1114.211
+              1496.804,
+              1096.45,
+              1114.243
             ]
           }
         },
         {
           "file": "chunks/hi/2.bin",
-          "nodeStart": 198009,
-          "nodeCount": 83499,
-          "neuronCount": 60,
+          "nodeStart": 198764,
+          "nodeCount": 99986,
+          "neuronCount": 142,
           "bboxUm": {
             "min": [
-              402.264,
-              329.253,
+              288.902,
+              316.295,
+              593.998
+            ],
+            "max": [
+              1592.225,
+              1106.724,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/3.bin",
+          "nodeStart": 298750,
+          "nodeCount": 99875,
+          "neuronCount": 135,
+          "bboxUm": {
+            "min": [
+              327.513,
+              290.884,
+              593.998
+            ],
+            "max": [
+              1597.711,
+              1113.368,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/4.bin",
+          "nodeStart": 398625,
+          "nodeCount": 99550,
+          "neuronCount": 135,
+          "bboxUm": {
+            "min": [
+              306.556,
+              287.562,
+              593.998
+            ],
+            "max": [
+              1636.764,
+              1109.584,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/5.bin",
+          "nodeStart": 498175,
+          "nodeCount": 99510,
+          "neuronCount": 150,
+          "bboxUm": {
+            "min": [
+              281.31,
+              291.654,
+              593.998
+            ],
+            "max": [
+              1554.551,
+              1109.98,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/6.bin",
+          "nodeStart": 597685,
+          "nodeCount": 99674,
+          "neuronCount": 152,
+          "bboxUm": {
+            "min": [
+              365.681,
+              317.549,
+              593.998
+            ],
+            "max": [
+              1466.851,
+              1128.108,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/7.bin",
+          "nodeStart": 697359,
+          "nodeCount": 99813,
+          "neuronCount": 149,
+          "bboxUm": {
+            "min": [
+              325.823,
+              305.954,
+              593.998
+            ],
+            "max": [
+              1487.418,
+              1120.012,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/8.bin",
+          "nodeStart": 797172,
+          "nodeCount": 99637,
+          "neuronCount": 136,
+          "bboxUm": {
+            "min": [
+              321.871,
+              301.84,
               593.998
             ],
             "max": [
               1520.724,
-              1114.138,
+              1112.532,
               1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/9.bin",
+          "nodeStart": 896809,
+          "nodeCount": 99571,
+          "neuronCount": 133,
+          "bboxUm": {
+            "min": [
+              336.847,
+              286.44,
+              593.998
+            ],
+            "max": [
+              1675.4,
+              1108.748,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/10.bin",
+          "nodeStart": 996380,
+          "nodeCount": 99682,
+          "neuronCount": 150,
+          "bboxUm": {
+            "min": [
+              290.462,
+              279.114,
+              593.998
+            ],
+            "max": [
+              1647.19,
+              1120.056,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/11.bin",
+          "nodeStart": 1096062,
+          "nodeCount": 67060,
+          "neuronCount": 133,
+          "bboxUm": {
+            "min": [
+              310.691,
+              301.642,
+              593.998
+            ],
+            "max": [
+              1598.881,
+              1134.686,
+              1114.243
             ]
           }
         }
       ]
     },
     "lite": {
-      "nodeCount": 204673,
+      "nodeCount": 332049,
       "chunks": [
         {
           "file": "chunks/lite/0.bin",
           "nodeStart": 0,
-          "nodeCount": 71426,
-          "neuronCount": 74,
+          "nodeCount": 28680,
+          "neuronCount": 147,
           "bboxUm": {
             "min": [
-              366.825,
-              336.645,
+              294.128,
+              305.162,
               593.998
             ],
             "max": [
-              1592.225,
-              1091.675,
+              1563.443,
+              1112.576,
               1114.283
             ]
           }
         },
         {
           "file": "chunks/lite/1.bin",
-          "nodeStart": 71426,
-          "nodeCount": 72514,
-          "neuronCount": 66,
+          "nodeStart": 28680,
+          "nodeCount": 28988,
+          "neuronCount": 149,
           "bboxUm": {
             "min": [
-              400.782,
-              317.549,
+              321.065,
+              291.61,
               593.998
             ],
             "max": [
-              1444.205,
-              1120.012,
-              1114.203
+              1496.804,
+              1096.45,
+              1114.243
             ]
           }
         },
         {
           "file": "chunks/lite/2.bin",
-          "nodeStart": 143940,
-          "nodeCount": 60733,
-          "neuronCount": 60,
+          "nodeStart": 57668,
+          "nodeCount": 28413,
+          "neuronCount": 142,
           "bboxUm": {
             "min": [
-              402.264,
-              329.253,
+              297.794,
+              316.295,
+              593.998
+            ],
+            "max": [
+              1592.225,
+              1106.724,
+              1114.243
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/3.bin",
+          "nodeStart": 86081,
+          "nodeCount": 27731,
+          "neuronCount": 135,
+          "bboxUm": {
+            "min": [
+              327.513,
+              290.884,
+              593.998
+            ],
+            "max": [
+              1597.711,
+              1113.368,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/4.bin",
+          "nodeStart": 113812,
+          "nodeCount": 28459,
+          "neuronCount": 135,
+          "bboxUm": {
+            "min": [
+              306.556,
+              288.442,
+              593.998
+            ],
+            "max": [
+              1636.764,
+              1109.584,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/5.bin",
+          "nodeStart": 142271,
+          "nodeCount": 28950,
+          "neuronCount": 150,
+          "bboxUm": {
+            "min": [
+              281.31,
+              291.654,
+              593.998
+            ],
+            "max": [
+              1532.892,
+              1109.98,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/6.bin",
+          "nodeStart": 171221,
+          "nodeCount": 28852,
+          "neuronCount": 152,
+          "bboxUm": {
+            "min": [
+              365.681,
+              321.267,
+              593.998
+            ],
+            "max": [
+              1466.851,
+              1128.108,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/7.bin",
+          "nodeStart": 200073,
+          "nodeCount": 28244,
+          "neuronCount": 149,
+          "bboxUm": {
+            "min": [
+              325.823,
+              305.954,
+              593.998
+            ],
+            "max": [
+              1487.418,
+              1120.012,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/8.bin",
+          "nodeStart": 228317,
+          "nodeCount": 27758,
+          "neuronCount": 136,
+          "bboxUm": {
+            "min": [
+              321.871,
+              306.262,
               593.998
             ],
             "max": [
               1520.724,
-              1114.138,
+              1111.806,
               1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/9.bin",
+          "nodeStart": 256075,
+          "nodeCount": 28304,
+          "neuronCount": 133,
+          "bboxUm": {
+            "min": [
+              336.847,
+              287.364,
+              593.998
+            ],
+            "max": [
+              1661.62,
+              1108.748,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/10.bin",
+          "nodeStart": 284379,
+          "nodeCount": 28343,
+          "neuronCount": 150,
+          "bboxUm": {
+            "min": [
+              290.462,
+              279.114,
+              593.998
+            ],
+            "max": [
+              1647.19,
+              1120.056,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/11.bin",
+          "nodeStart": 312722,
+          "nodeCount": 19327,
+          "neuronCount": 133,
+          "bboxUm": {
+            "min": [
+              310.691,
+              307.429,
+              593.998
+            ],
+            "max": [
+              1598.881,
+              1134.686,
+              1114.203
             ]
           }
         }
       ]
     }
   },
-  "synapses": null,
+  "synapses": {
+    "file": "synapses.bin",
+    "count": 180258
+  },
   "credits": {
     "dataset": "MICrONS minnie65 (cubic millimetre of mouse visual cortex), proofread skeletons v1300 and aibs_cell_info",
     "licence": "CC BY 4.0",
