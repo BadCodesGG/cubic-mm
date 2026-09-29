@@ -55,6 +55,9 @@ export function createSceneUniforms() {
     opacity: uniform(0.6),
     axonAlpha: uniform(0.14),
     somaGain: uniform(0.8),
+
+    /** Neuron index the visitor has selected, or -1. Written by app.ts on `select`; materials may read it to highlight. */
+    selectedNeuron: uniform(-1),
   };
 }
 
