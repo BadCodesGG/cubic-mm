@@ -37,6 +37,12 @@ export interface EventMap {
   tour: { running: boolean };
   /** Capture the current frame at high resolution. Fired by the HUD or the `P` key. */
   screenshot: Record<string, never>;
+  /** The pointer is over a soma (or -1 when it left). Fired by the picker; the partner graph listens. */
+  hover: { neuron: number };
+  /** Show or hide a cell's input and output partners as lines. Fired by the HUD. */
+  partners: { neuron: number; show: boolean };
+  /** A guided story started (`id` set) or ended (`id` null). Fired by the story player. */
+  story: { id: string | null };
   /** Simulation mode changed (WebGPU compute or CPU worker). */
   mode: {
     gpu: boolean;
