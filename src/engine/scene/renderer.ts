@@ -9,16 +9,15 @@ export interface RendererHandle {
   isWebGPU: boolean;
 }
 
-function isMobile(): boolean {
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-}
-
 export async function createRenderer(
   canvas: HTMLCanvasElement,
-  { forceWebGL = false }: { forceWebGL?: boolean } = {},
+  { forceWebGL = false, trackTimestamp = false }: { forceWebGL?: boolean; trackTimestamp?: boolean } = {},
 ): Promise<RendererHandle> {
-  const renderer = new WebGPURenderer({ canvas, antialias: true, forceWebGL, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isMobile() ? 1.5 : 2));
+  // No MSAA: every ribbon and soma already has a soft analytic edge, and 4x MSAA on the
+  // half-float scene target was a quarter to two thirds of the GPU time (blend bandwidth).
+  const renderer = new WebGPURenderer({ canvas, antialias: false, forceWebGL, powerPreference: "high-performance", trackTimestamp });
+  // The app lowers this once it knows the quality level (see `maxPixelRatio` in quality.ts).
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setClearColor(BACKGROUND, 1);
   renderer.toneMapping = NoToneMapping;
   await renderer.init();
