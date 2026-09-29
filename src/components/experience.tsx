@@ -152,7 +152,7 @@ export default function Experience() {
       {gate === "still" ? (
         <Still>
           <p className="mt-3 text-[15px] leading-snug text-slate-100">Your device asks for reduced motion, so the volume is paused on a still.</p>
-          <p className="mt-1.5 text-[13px] leading-snug text-slate-400">
+          <p className="mt-1.5 text-[13px] leading-snug text-slate-300">
             Entering starts the live scene: slowly drifting neurons and travelling light.
           </p>
           <button
@@ -162,14 +162,14 @@ export default function Experience() {
           >
             Enter anyway
           </button>
-          <p className="mt-2 text-[11px] text-slate-500">Remembered on this device.</p>
+          <p className="mt-2 text-xs text-slate-300">Remembered on this device.</p>
         </Still>
       ) : null}
 
       {gate === "unsupported" ? (
         <Still>
           <p className="mt-3 text-[15px] leading-snug text-slate-100">This browser can draw neither WebGPU nor WebGL 2, so the live volume cannot start.</p>
-          <p className="mt-1.5 text-[13px] leading-snug text-slate-400">
+          <p className="mt-1.5 text-[13px] leading-snug text-slate-300">
             Try a recent Chrome, Edge, Firefox or Safari on a device with a graphics chip. The picture is a frame from the live scene.
           </p>
         </Still>
@@ -182,7 +182,7 @@ export default function Experience() {
         aria-hidden={!showLoader}
       >
         <div className="flex w-64 flex-col items-center gap-3">
-          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-400/80">
+          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-400">
             {error ? "Could not start" : load.label}
           </p>
           <div className="h-px w-full overflow-hidden bg-slate-500/20">

@@ -61,7 +61,7 @@ export default function AudioToggle() {
       title={on ? "Sound on" : armed ? "Sound on: click anywhere to start" : "Sound off"}
       onClick={toggle}
       data-hud-panel="audio"
-      className="absolute right-4 top-14 flex h-9 w-9 items-center justify-center rounded-full border border-slate-400/20 bg-slate-900/40 text-slate-300 backdrop-blur-sm transition-colors hover:bg-slate-800/60 hover:text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200/80 aria-pressed:border-cyan-200/40 aria-pressed:text-cyan-100"
+      className="absolute right-4 top-14 flex size-9 items-center justify-center rounded-[4px] border border-slate-500/30 bg-slate-900/40 text-slate-200 backdrop-blur-sm transition-colors hover:bg-slate-800/60 hover:text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-200/80 aria-pressed:border-cyan-200/40 aria-pressed:text-cyan-100"
     >
       <svg
         viewBox="0 0 24 24"

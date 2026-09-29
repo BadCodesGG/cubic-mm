@@ -71,7 +71,7 @@ function StickZone({ label, onChange }: { label: string; onChange: (s: Stick) =>
       onPointerUp={end}
       onPointerCancel={end}
     >
-      <span className="pointer-events-none absolute top-2 font-mono text-[9px] uppercase tracking-[0.18em] text-slate-500">{label}</span>
+      <span className="pointer-events-none absolute top-2 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-400">{label}</span>
       <div ref={knob} className="pointer-events-none size-11 rounded-full border border-cyan-200/50 bg-cyan-200/15" />
     </div>
   );
