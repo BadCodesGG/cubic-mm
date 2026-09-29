@@ -34,8 +34,10 @@ export interface ModelParams {
   /** Poisson background drive per neuron, events per second, so the volume is never dead. */
   backgroundRateHz: number;
   /**
-   * Input each background event adds. At 1.0 (vThreshold - vRest) an event fires a resting cell,
-   * so the background rate is the spontaneous firing rate; recent inhibition can still veto it.
+   * Input each background event adds. Above 1.0 (vThreshold - vRest) an event fires a resting
+   * cell; recent inhibition can still veto it. Exactly 1.0 let the float residue of inhibition
+   * from seconds earlier veto most events. At 1.1 and 0.5 Hz, the real 1,711-cell wiring fires
+   * about 0.33 Hz per neuron: the rest is vetoed by inhibition from the last few tens of ms.
    */
   backgroundWeight: number;
   excWeight: number;
@@ -55,8 +57,8 @@ export const DEFAULT_PARAMS: ModelParams = {
   vThreshold: 1,
   vReset: 0,
   refractoryMs: 4,
-  backgroundRateHz: 0.4,
-  backgroundWeight: 1.0,
+  backgroundRateHz: 0.5,
+  backgroundWeight: 1.1,
   excWeight: 0.08,
   inhWeight: -0.12,
   sizeGain: 1.0,

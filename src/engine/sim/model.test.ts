@@ -3,7 +3,7 @@ import { synthDataset } from "../synth";
 import { SpikingModel, type ModelSynapses } from "./model";
 
 /** Recorded from the run below; a change here means the model or the synthetic wiring changed. */
-const GOLDEN_SPIKES = 351;
+const GOLDEN_SPIKES = 521;
 
 /**
  * A -> B excitatory, B -> C inhibitory. Path distances are quarter-µm: A's synapse sits 100 µm
