@@ -125,3 +125,23 @@ export function useStatus(app: App): Status {
   }, [app]);
   return status;
 }
+
+// --- r3/tour ---
+/** True while the intro tour plays; the HUD shows only its captions and Skip then. */
+export function useTourRunning(app: App): boolean {
+  return useSyncExternalStore(
+    (notify) => app.bus.on("tour", notify),
+    () => app.tour.running(),
+    () => false,
+  );
+}
+
+/** The simulation speed: 1, 0.1 or 0 (paused). */
+export function useTimeScale(app: App): number {
+  return useSyncExternalStore(
+    (notify) => app.bus.on("timeScale", notify),
+    () => app.timeScale(),
+    () => 1,
+  );
+}
+// --- end r3/tour

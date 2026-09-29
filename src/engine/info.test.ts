@@ -48,7 +48,7 @@ describe("describeNeuron", () => {
 
   it("carries the whole MICrONS cell-type map", () => {
     expect(Object.keys(CELL_TYPE_NAMES).sort()).toEqual(
-      ["", "23P", "4P", "5P-ET", "5P-IT", "5P-NP", "6P-CT", "6P-IT", "BC", "BPC", "MC", "NGC"].sort(),
+      ["", "23P", "4P", "5P-ET", "5P-IT", "5P-NP", "6P-CT", "6P-IT", "6P-U", "BC", "BPC", "MC", "NGC"].sort(),
     );
     expect(CELL_TYPE_NAMES[""]).toBe("unclassified");
   });

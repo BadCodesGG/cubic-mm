@@ -66,3 +66,26 @@ export function writePref<K extends keyof Prefs>(key: K, value: Prefs[K], storag
     return false;
   }
 }
+
+// --- r3/tour: the intro tour plays once; `cmm-tour` is "seen" after it ends or is skipped ---
+export const TOUR_KEY = "cmm-tour";
+
+export function readTourSeen(storage: Reader | null = defaultStorage()): boolean {
+  try {
+    return storage?.getItem(TOUR_KEY) === "seen";
+  } catch {
+    return false;
+  }
+}
+
+/** Returns false when storage refused it; the tour then plays again next visit. */
+export function markTourSeen(storage: Writer | null = defaultStorage()): boolean {
+  try {
+    if (!storage) return false;
+    storage.setItem(TOUR_KEY, "seen");
+    return true;
+  } catch {
+    return false;
+  }
+}
+// --- end r3/tour
