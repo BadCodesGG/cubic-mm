@@ -80,6 +80,7 @@ const PARAMS: string[][] = [
   ["slow motion", `${int.format(DEFAULT_PARAMS.slowMo)}×`, "applied to travel time only"],
   ["synaptic delay", `${DEFAULT_PARAMS.synDelayMs} ms`, "added once per synapse"],
   ["background drive", `${DEFAULT_PARAMS.backgroundRateHz} Hz`, `Poisson events per neuron, weight ${DEFAULT_PARAMS.backgroundWeight}`],
+  ["driven gain", `${DEFAULT_PARAMS.drivenGain.map((g) => `${g}×`).join(", ")}, then 1×`, "weight of a stimulated cascade's pulses, hop by hop"],
 ];
 
 export function TheSimulation() {
@@ -101,6 +102,12 @@ export function TheSimulation() {
         <li>These are point neurons. There is no dendritic computation: a synapse far out on a branch counts the same as one at the soma.</li>
         <li>The data has no myelination, so one conduction velocity stands in for every axon.</li>
         <li>Nothing is fitted to recordings. The weights are round numbers, and the background drive is Poisson noise, there only to keep the volume alive.</li>
+        <li>
+          A stimulated spike is delivered at {DEFAULT_PARAMS.drivenGain[0]}× weight, falling to 4×, 2× and then 1× over the next hops, so a cascade is
+          visible: with travel slowed and the membrane at real speed, pulses land seconds apart and never add up, so an
+          ordinary spike fires nothing downstream. The clicked cell always fires, and the background dynamics are
+          untouched.
+        </li>
         <li>So this is a real wiring diagram with a toy dynamics on it. It shows the wiring, not a prediction of what the mouse&apos;s cortex does.</li>
       </ul>
     </Section>

@@ -164,8 +164,8 @@ async function attempt(strategy) {
         await page.waitForTimeout(6000);
       }
     }
-    info.viewNow = await page.evaluate(() => window.__cmm.view?.());
-    info.hashNow = await page.evaluate(() => location.hash);
+    const viewNow = await page.evaluate(() => window.__cmm.view?.());
+    const hashNow = await page.evaluate(() => location.hash);
     // --stimulate=N (with --live, whose clock keeps running): select and stimulate neuron N, then wait
     // --after=S seconds (default 4) so its cascade has spread before the frame is taken.
     const stimulateNeuron = value("stimulate", null);
@@ -182,6 +182,7 @@ async function attempt(strategy) {
       }
     }
     const info = await page.evaluate(() => ({ ...window.__cmm }));
+    Object.assign(info, { viewNow, hashNow });
     info.cascade = await page.evaluate(() => window.__cmm.cascade?.() ?? null);
     if (mobile) info.layout = await page.evaluate(layoutReport);
     if (!wantWebGL && !info.isWebGPU) return { ok: false, info, errors, threeWarnings, reason: "fell back to WebGL2" };
