@@ -9,6 +9,7 @@ import { readPrefs, writePref } from "@/engine/prefs";
 // The HUD reaches into the engine's data helpers (and so into three); it loads with the engine, never
 // with the still or the loader.
 const Hud = dynamic(() => import("./hud/hud").then((m) => m.Hud), { ssr: false });
+import AudioToggle from "./audio-toggle";
 
 interface LoadState {
   fraction: number;
@@ -194,6 +195,7 @@ export default function Experience() {
       </div>
 
       {ready && app ? <Hud app={app} /> : null}
+      <AudioToggle />
     </main>
   );
 }

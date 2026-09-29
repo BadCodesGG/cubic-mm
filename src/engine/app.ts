@@ -21,6 +21,9 @@ import { createSimulation, type Simulation } from "./sim";
 import { createLayers } from "./scene/layers";
 import { createPost } from "./scene/post";
 import { createSceneUniforms } from "./scene/uniforms";
+// r1-audio: imports
+import { createAudio, type AudioEngine } from "./audio/engine";
+import { publishAudio, unpublishAudio } from "./audio/handle";
 import { FlyControls, heroPath, WORLD_UP, type CameraPose, type HeroAnchor } from "./camera/fly";
 // --- r1/nav: navigation imports (picker, ride camera, HUD frame) ---
 import { Picker } from "./picker";
@@ -267,6 +270,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const rideDir = new Vector3();
   // --- end r1/nav ---
   const heroNeuron = hero.neuron;
+  // --- r1-audio: synthesised spatial sound, subscribed to the bus ---
+  const audio: AudioEngine = createAudio({ bus, dataset: data, getCamera: () => camera });
+  publishAudio(audio);
+  // --- end r1-audio ---
 
   const debug: CmmDebug = {
     isWebGPU,
@@ -352,6 +359,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     debug.sim!.rateHz = sim.stats.rateHz;
     debug.sim!.stimulated = sim.stats.stimulated;
     // --- end sim ---
+    audio.update(dt); // r1-audio
     u.time.value = simTime;
     debug.hero.distanceUm = camera.position.distanceTo(hero.anchor.soma);
     const ndc = hero.anchor.soma.clone().project(camera);
@@ -411,6 +419,8 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       void renderer.setAnimationLoop(null);
       observer.disconnect();
       controls?.dispose();
+      unpublishAudio(audio); // r1-audio
+      audio.dispose(); // r1-audio
       post.dispose();
       neurons.dispose();
       // --- sim (r1/sim) ---
