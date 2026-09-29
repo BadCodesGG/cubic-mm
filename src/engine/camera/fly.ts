@@ -8,6 +8,7 @@
  */
 
 import { Vector3, type PerspectiveCamera } from "three/webgpu";
+import { NO_STICK, TOUCH_LOOK_RATE, type Stick } from "./touch";
 
 export const WORLD_UP = new Vector3(0, -1, 0);
 
@@ -16,8 +17,17 @@ const BASE_SPEED = 45; // µm per second
 const BOOST = 4;
 const MAX_PITCH = Math.PI / 2 - 0.05;
 
+/** Pixels a pointer may travel between press and release and still count as a click, not a drag. */
+const DRAG_PX = 5;
+
 export class FlyControls {
   enabled = true;
+  /** Asked on a click before requesting pointer lock; the picker says no when the click landed on a neuron. */
+  canLock: (e: MouseEvent) => boolean = () => true;
+  private touchMove: Stick = NO_STICK;
+  private touchLook: Stick = NO_STICK;
+  private dragFrom: { x: number; y: number } | null = null;
+  private dragged = false;
   private yaw = 0;
   private pitch = 0;
   private targetYaw = 0;
@@ -35,6 +45,9 @@ export class FlyControls {
   ) {
     camera.up.copy(WORLD_UP);
     dom.addEventListener("click", this.onClick);
+    dom.addEventListener("pointerdown", this.onPointerDown);
+    window.addEventListener("pointermove", this.onPointerMove);
+    window.addEventListener("pointerup", this.onPointerUp);
     document.addEventListener("pointerlockerror", this.onLockError);
     document.addEventListener("mousemove", this.onMouseMove);
     window.addEventListener("keydown", this.onKeyDown);
@@ -50,8 +63,16 @@ export class FlyControls {
     this.apply();
   }
 
+  /** Left and right touch sticks (`camera/touch.ts`): move and look. */
+  setSticks(move: Stick, look: Stick): void {
+    this.touchMove = move;
+    this.touchLook = look;
+  }
+
   update(dt: number): void {
     if (!this.enabled) return;
+    this.targetYaw += this.touchLook.x * TOUCH_LOOK_RATE * dt;
+    this.targetPitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.targetPitch + this.touchLook.y * TOUCH_LOOK_RATE * dt));
     const look = 1 - Math.exp(-dt * 14);
     this.yaw += (this.targetYaw - this.yaw) * look;
     this.pitch += (this.targetPitch - this.pitch) * look;
@@ -65,6 +86,7 @@ export class FlyControls {
     if (this.keys.has("KeyA")) this.wish.sub(this.right);
     if (this.keys.has("KeyE")) this.wish.add(WORLD_UP);
     if (this.keys.has("KeyQ")) this.wish.sub(WORLD_UP);
+    this.wish.addScaledVector(this.forward, this.touchMove.y).addScaledVector(this.right, this.touchMove.x);
     if (this.wish.lengthSq() > 0) this.wish.normalize();
     const boosted = this.keys.has("ShiftLeft") || this.keys.has("ShiftRight");
     this.wish.multiplyScalar(BASE_SPEED * (boosted ? BOOST : 1));
@@ -74,6 +96,9 @@ export class FlyControls {
 
   dispose(): void {
     this.dom.removeEventListener("click", this.onClick);
+    this.dom.removeEventListener("pointerdown", this.onPointerDown);
+    window.removeEventListener("pointermove", this.onPointerMove);
+    window.removeEventListener("pointerup", this.onPointerUp);
     document.removeEventListener("pointerlockerror", this.onLockError);
     document.removeEventListener("mousemove", this.onMouseMove);
     window.removeEventListener("keydown", this.onKeyDown);
@@ -94,6 +119,8 @@ export class FlyControls {
     // for us, the visitor just keeps the unlocked camera. Chrome reports it both as a rejected promise
     // and as a `pointerlockerror` event, so both are swallowed.
     if (!e.isTrusted || !this.enabled || document.pointerLockElement === this.dom) return;
+    // A drag that ended on the canvas is a look gesture, a touch has its sticks, and a click on a neuron selects it.
+    if (this.dragged || !this.canLock(e) || matchMedia("(pointer: coarse)").matches) return;
     try {
       const result = this.dom.requestPointerLock() as Promise<void> | undefined;
       result?.catch(() => {});
@@ -104,9 +131,28 @@ export class FlyControls {
 
   private onLockError = () => {};
 
+  private onPointerDown = (e: PointerEvent) => {
+    this.dragged = false;
+    this.dragFrom = e.pointerType === "mouse" && e.button === 0 ? { x: e.clientX, y: e.clientY } : null;
+  };
+
+  /** With the mouse free (no pointer lock), holding the button and dragging looks around. */
+  private onPointerMove = (e: PointerEvent) => {
+    if (!this.dragFrom || !this.enabled || document.pointerLockElement === this.dom) return;
+    if (!this.dragged && Math.hypot(e.clientX - this.dragFrom.x, e.clientY - this.dragFrom.y) <= DRAG_PX) return;
+    this.dragged = true;
+    this.targetYaw += e.movementX * LOOK_SENSITIVITY;
+    this.targetPitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.targetPitch + e.movementY * LOOK_SENSITIVITY));
+  };
+
+  private onPointerUp = () => {
+    this.dragFrom = null;
+  };
+
   private onMouseMove = (e: MouseEvent) => {
     if (!this.enabled || document.pointerLockElement !== this.dom) return;
-    this.targetYaw -= e.movementX * LOOK_SENSITIVITY;
+    // Yaw grows toward the camera's right (+x when facing +z), so moving the mouse right turns right.
+    this.targetYaw += e.movementX * LOOK_SENSITIVITY;
     this.targetPitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.targetPitch - e.movementY * LOOK_SENSITIVITY));
   };
 
