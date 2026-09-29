@@ -16,6 +16,13 @@ import { createLayers } from "./scene/layers";
 import { createPost } from "./scene/post";
 import { createSceneUniforms } from "./scene/uniforms";
 import { FlyControls, heroPath, WORLD_UP, type CameraPose, type HeroAnchor } from "./camera/fly";
+// --- r1/nav: navigation imports (picker, ride camera, HUD frame, event bus) ---
+import { EventBus } from "./events";
+import { Picker } from "./picker";
+import { AHEAD_UM, RideCamera } from "./camera/ride";
+import { createHudFrame, updateHudFrame, type HudFrame } from "./camera/view";
+import type { Stick } from "./camera/touch";
+// --- end r1/nav ---
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -26,11 +33,27 @@ export interface AppOptions {
   /** Simulation time the hero shot holds at, seconds. */
   holdAt?: number;
   onProgress?: (fraction: number, label: string) => void;
+  // --- r1/nav ---
+  /** "hero" selects the hero neuron at start, so screenshots can show the selection panel. */
+  select?: string | null;
+  // --- end r1/nav ---
 }
 
 export interface App {
   isWebGPU: boolean;
   dispose(): void;
+  // --- r1/nav: what the HUD reads and drives ---
+  bus: EventBus;
+  data: Dataset;
+  /** Mutable per-frame numbers for the HUD (scale bar, compass, selection ring, ride state). */
+  hud: HudFrame;
+  /** Currently selected neuron, -1 for none. */
+  selection(): number;
+  /** Stop waiting for, or riding, a spike and give the camera back. */
+  cancelRide(): void;
+  /** Touch pad input: left stick moves, right stick looks. */
+  setSticks(move: Stick, look: Stick): void;
+  // --- end r1/nav ---
 }
 
 export interface CmmDebug {
@@ -45,6 +68,10 @@ export interface CmmDebug {
   settled: boolean;
   dataset: "real" | "synth";
   hero: { neuron: number; distanceUm: number; screen: [number, number] };
+  // --- r1/nav ---
+  selected: number;
+  ride: string;
+  // --- end r1/nav ---
 }
 
 declare global {
@@ -64,6 +91,9 @@ class SpikeSchedule {
   heroNext: number;
   count = 0;
   dirty = true;
+  // --- r1/nav: the round-0 schedule also publishes `spike` events, until the real simulation does ---
+  onSpike: ((neuron: number, time: number, stimulated: boolean) => void) | null = null;
+  // --- end r1/nav ---
 
   constructor(
     private readonly times: Float32Array,
@@ -91,11 +121,17 @@ class SpikeSchedule {
     return -Math.log(1 - this.r()) * RANDOM_MEAN_INTERVAL;
   }
 
-  private emit(n: number, t: number): void {
+  private emit(n: number, t: number, stimulated = false): void {
     this.times[n * SPIKE_SLOTS + this.slot[n]] = t;
     this.slot[n] = (this.slot[n] + 1) % SPIKE_SLOTS;
     this.count++;
     this.dirty = true;
+    this.onSpike?.(n, t, stimulated);
+  }
+
+  /** r1/nav: fire neuron `n` now (a visitor stimulation). */
+  inject(n: number, t: number): void {
+    this.emit(n, t, true);
   }
 
   advance(t: number, hero: () => number): void {
@@ -247,8 +283,29 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
 
   const post = createPost(renderer, scene, camera);
 
+  // --- r1/nav: bus, picker, ride camera, HUD frame ---
+  const bus = new EventBus();
+  const hud = createHudFrame();
+  let selected = -1;
+  bus.on("select", (e) => {
+    selected = e.neuron;
+    u.selectedNeuron.value = e.neuron;
+  });
+  // The ride is created first so its Esc handler runs before the picker's and can mark the key consumed.
+  const ride = new RideCamera(data, bus, camera, controls);
+  const picker = new Picker(canvas, camera, neurons.somaPos, bus);
+  if (controls) controls.canLock = (e) => picker.pickAt(e) < 0;
+  const focus = new Vector3();
+  const selectedSoma = new Vector3();
+  const rideDir = new Vector3();
+  // --- end r1/nav ---
+
   const holdAt = opts.holdAt ?? 1.3;
   const schedule = new SpikeSchedule(neurons.textures.spikeTimes, data.neurons.count, 11, shot ? 1.0 : 0.6);
+  // --- r1/nav: ROUND-0 STAND-IN. Remove when the real simulation publishes `spike` and handles `stimulate`. ---
+  schedule.onSpike = (neuron, time, stimulated) => bus.emit("spike", { neuron, time, stimulated });
+  const offStimulate = bus.on("stimulate", (e) => schedule.inject(e.neuron, simTime));
+  // --- end r1/nav ---
   let heroNeuron = hero.neuron;
   const pickHeroNeuron = () => {
     if (!shot) heroNeuron = nearestSoma(neurons.somaPos, camera.position);
@@ -265,6 +322,8 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     settled: false,
     dataset: source,
     hero: { neuron: hero.neuron, distanceUm: 0, screen: [0, 0] },
+    selected: -1,
+    ride: "idle",
   };
   window.__cmm = debug;
 
@@ -307,7 +366,9 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       camera.lookAt(pose.target);
     } else {
       simTime += dt;
-      controls?.update(dt);
+      // --- r1/nav: the ride owns the camera while it runs, FlyControls otherwise ---
+      if (!ride.update(simTime, dt)) controls?.update(dt);
+      // --- end r1/nav ---
     }
 
     schedule.advance(simTime, pickHeroNeuron);
@@ -322,16 +383,50 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     debug.simTime = simTime;
     debug.spikes = schedule.count;
 
+    // --- r1/nav: HUD numbers for this frame ---
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const focusNeuron = selected >= 0 ? selected : heroNeuron;
+    focus.fromArray(neurons.somaPos, focusNeuron * 3);
+    // On a ride the camera is inside the axon: measure the scale at the point being looked at, not at the far soma.
+    if (ride.active) focus.copy(camera.position).addScaledVector(camera.getWorldDirection(rideDir), AHEAD_UM);
+    if (selected >= 0) selectedSoma.fromArray(neurons.somaPos, selected * 3);
+    updateHudFrame(hud, camera, w, h, focus, selected >= 0 ? selectedSoma : null);
+    hud.ride = ride.state;
+    hud.rideNeuron = ride.neuron;
+    hud.locked = document.pointerLockElement === canvas;
+    debug.selected = selected;
+    debug.ride = ride.state;
+    // --- end r1/nav ---
+
     post.render();
     debug.frame++;
   };
 
   progress(1, "Ready");
   await renderer.setAnimationLoop(loop);
+  // --- r1/nav ---
+  bus.emit("mode", { gpu: isWebGPU, neuronCount: data.neurons.count, synapseCount: data.synapses?.count ?? 0 });
+  if (opts.select === "hero") bus.emit("select", { neuron: hero.neuron });
+  // --- end r1/nav ---
 
   return {
     isWebGPU,
+    // --- r1/nav ---
+    bus,
+    data,
+    hud,
+    selection: () => selected,
+    cancelRide: () => ride.cancel(),
+    setSticks: (move, look) => controls?.setSticks(move, look),
+    // --- end r1/nav ---
     dispose() {
+      // --- r1/nav ---
+      offStimulate();
+      ride.dispose();
+      picker.dispose();
+      bus.clear();
+      // --- end r1/nav ---
       disposed = true;
       abort.abort();
       void renderer.setAnimationLoop(null);
