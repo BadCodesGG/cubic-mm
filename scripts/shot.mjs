@@ -4,12 +4,21 @@
  *   npm run build && node scripts/shot.mjs [--synth] [--t=1.45] [--webgl] [--name=hero] [--port=3117] [--sim=cpu]
  *     [--quality=hi|lite|auto] [--pieces=1|2|3] [--mobile] [--live] [--frames=10] [--uncapped] [--gpu-timing] [--budgetMs=20]
  *
+ * --hash=<c=...&n=...&v=...> opens a shareable link (implies nothing else: pair it with --live, since a
+ * scripted shot keeps its own camera). --query=a=b&c=d adds URL parameters, e.g. --query=select=hero.
+ * --clean hides the HUD, loader and sound button for the capture (the hero still is taken this way).
+ * --type=<text> (with --live) presses "/" and types into the cell search before the capture; --enter
+ * then presses Enter and waits for the flight. The camera view and the address-bar hash are printed.
+ *
+ * --select starts with the hero selected; --stimulate=N (with --live) selects and stimulates neuron N, then waits --after=S s (default 4), or with --until-hop1=N until N cells have fired.
  * --quality / --pieces pin the render tier (default: the scripted shot's own, hi/2 on WebGPU).
  * --budgetMs lowers the adaptive frame budget (with --live), to watch the tier step down.
  * --mobile emulates a 390x844 phone (DPR 3, touch, coarse pointer, a phone user agent) and also
  * checks that the HUD panels do not overlap, the page has no horizontal overflow, the touch sticks
  * show, and the renderer's pixel ratio is at most 1.5. --live drops `shot=hero`, so the page runs
  * as a visitor sees it (free camera, adaptive quality) and is captured after 6 s.
+ * --tour opens `/?tour=1&t=<--t>`: the intro tour on its fixed clock, held at t tour seconds.
+ * Every other run marks the tour seen first, so it never covers the view being captured.
  *
  * Starts `next start` on port 3117, opens `/?shot=hero` in Playwright Chromium at 1600x900,
  * DPR 1, waits for the frame counter and the shot clock to settle, asserts WebGPU (unless
@@ -38,20 +47,26 @@ const SHOTS = path.join(ROOT, ".claude", "shots");
 const wantWebGL = flag("webgl");
 const mobile = flag("mobile");
 const live = flag("live");
+const tour = flag("tour");
 const name = value("name", mobile ? "mobile" : "hero");
-const query = new URLSearchParams(live ? {} : { shot: "hero" });
+const query = new URLSearchParams(live || tour ? {} : { shot: "hero" });
+if (tour) query.set("tour", "1");
 if (flag("gpu-timing")) query.set("gpuTiming", "1");
 for (const k of ["quality", "pieces", "budgetMs"]) {
   const v = value(k, null);
   if (v) query.set(k, v);
 }
 if (flag("synth")) query.set("synth", "1");
+// --select: the hero starts selected, so the shot shows the cell panel (and the cascade panel under it).
+if (flag("select")) query.set("select", "hero");
 if (wantWebGL) query.set("webgl", "1");
 const simMode = value("sim", null);
 if (simMode) query.set("sim", simMode);
 const t = value("t", null);
 if (t) query.set("t", t);
-const url = `${BASE}/?${query}`;
+for (const [k, v] of new URLSearchParams(value("query", ""))) query.set(k, v);
+const linkHash = value("hash", "");
+const url = `${BASE}/?${query}${linkHash ? `#${linkHash}` : ""}`;
 
 const GPU_ARGS = ["--enable-unsafe-webgpu", "--enable-features=Vulkan,UseSkiaRenderer", "--use-angle=d3d11", "--ignore-gpu-blocklist"];
 // --uncapped: frames are not held to the display's refresh, so the frame time measures the GPU work.
@@ -116,6 +131,7 @@ async function attempt(strategy) {
           }
         : { viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 },
     );
+    if (!tour) await context.addInitScript(() => localStorage.setItem("cmm-tour", "seen"));
     const page = await context.newPage();
     page.on("console", (msg) => {
       const text = msg.text();
@@ -138,9 +154,39 @@ async function attempt(strategy) {
     await page.waitForFunction((f) => window.__cmm.frame > f, (await page.evaluate(() => window.__cmm.frame)) + extra, {
       timeout: 120_000,
     });
+    const typed = value("type", null);
+    if (typed !== null) {
+      await page.keyboard.press("/");
+      await page.keyboard.type(typed, { delay: 30 });
+      await page.waitForTimeout(400);
+      if (flag("enter")) {
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(6000);
+      }
+    }
+    const viewNow = await page.evaluate(() => window.__cmm.view?.());
+    const hashNow = await page.evaluate(() => location.hash);
+    // --stimulate=N (with --live, whose clock keeps running): select and stimulate neuron N, then wait
+    // --after=S seconds (default 4) so its cascade has spread before the frame is taken.
+    const stimulateNeuron = value("stimulate", null);
+    if (stimulateNeuron !== null) {
+      await page.evaluate((n) => window.__cmm.stimulate(n), Number(stimulateNeuron));
+      const untilHop1 = Number(value("until-hop1", 0));
+      if (untilHop1 > 0) {
+        // Take the frame as soon as N cells have fired, while their lines are still fresh.
+        await page
+          .waitForFunction((n) => window.__cmm.cascade().hop1 >= n, untilHop1, { timeout: Number(value("after", 8)) * 1000, polling: 50 })
+          .catch(() => console.log(`  fewer than ${untilHop1} cells fired within --after`));
+      } else {
+        await page.waitForTimeout(Number(value("after", 4)) * 1000);
+      }
+    }
     const info = await page.evaluate(() => ({ ...window.__cmm }));
+    Object.assign(info, { viewNow, hashNow });
+    info.cascade = await page.evaluate(() => window.__cmm.cascade?.() ?? null);
     if (mobile) info.layout = await page.evaluate(layoutReport);
     if (!wantWebGL && !info.isWebGPU) return { ok: false, info, errors, threeWarnings, reason: "fell back to WebGL2" };
+    if (flag("clean")) await page.addStyleTag({ content: "main > :not(canvas) { visibility: hidden !important; }" });
     const out = await nextShotPath();
     await page.screenshot({ path: out });
     return { ok: true, info, errors, threeWarnings, out };
@@ -177,6 +223,8 @@ try {
       (info.sim ? `sim ${info.sim.mode}${info.sim.syntheticSynapses ? " (synthetic synapses)" : ""} on ${info.sim.synapses} synapses, ` : "") +
       `hero neuron ${info.hero.neuron} at ${info.hero.distanceUm.toFixed(0)} µm, on screen at ${info.hero.screen.map((v) => v.toFixed(0)).join(",")}`,
   );
+  if (info.viewNow) console.log(`  view ${JSON.stringify(info.viewNow)}, selected ${info.selected}, hash ${info.hashNow || "(none)"}`);
+  if (info.cascade) console.log(`  cascade ${JSON.stringify(info.cascade)}`);
   if (info.quality) {
     const q = info.quality;
     console.log(`  quality ${q.tier}/${q.pieces} (${q.instances} instances${q.adapted ? ", adapted down" : ""}), sim ${info.sim?.rateHz.toFixed(2)} Hz/neuron`);

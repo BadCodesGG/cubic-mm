@@ -112,6 +112,7 @@ export default function Experience() {
           quality: prefs.quality,
           holdAt: Number.isFinite(hold) && hold > 0 ? hold : undefined,
           select: params.get("select"),
+          tour: params.get("tour") === "1", // r3/tour
           onProgress: (fraction, label) => {
             if (!disposed) setLoad({ fraction, label });
           },

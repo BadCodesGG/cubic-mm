@@ -10,7 +10,12 @@
  * The two background RNGs differ (mulberry32 on the CPU, a PCG hash on the GPU), and the GPU
  * sums input in fixed point, so spike trains are compared statistically, not bit for bit:
  *   - total spikes within 15% of each other;
- *   - the hero's cascade reaches exactly the same set of first-hop post neurons.
+ *   - the hero's cascade reaches exactly the same set of first-hop post neurons;
+ *   - at least 3 cells fire at hop 1 (generation 1 of the driven cascade) on each, and every one of
+ *     them is a first-hop post of the hero. Which of the 11 fire is reported, not compared: a target
+ *     fires only if the background has not left it inhibited, and the background differs between
+ *     the two RNGs (the CPU path even differs run to run, as the stimulus lands on a frame
+ *     boundary the worker's batching decides). Hop 2 and later are reported too.
  * Also fails on any console error or any `THREE.` warning.
  */
 
@@ -62,6 +67,7 @@ async function run(browser, sim, benchSizes = []) {
       heroSpikes: counts[d.hero.neuron],
       neuronsThatFired: counts.filter((c) => c > 0).length,
       firstHop: d.sim.firstHop(),
+      cascade: d.cascade ? d.cascade() : null,
     };
   });
   result.bench = [];
@@ -115,6 +121,21 @@ try {
     console.log(`First hop from hero: GPU ${g.size} posts, CPU ${c.size} posts, only-GPU [${onlyGpu}], only-CPU [${onlyCpu}]`);
     if (g.size === 0) failures.push("the hero's cascade reached no post neurons");
     if (onlyGpu.length || onlyCpu.length) failures.push("first-hop sets differ");
+    const hop1 = (r) => r.cascade?.hop1Cells ?? [];
+    const gh = new Set(hop1(gpu));
+    const ch = new Set(hop1(cpu));
+    const both = hop1(gpu).filter((n) => ch.has(n));
+    console.log(
+      `Driven cascade from hero: hop 1 fired GPU ${gh.size} [${hop1(gpu)}], CPU ${ch.size} [${hop1(cpu)}], ` +
+        `${both.length} in both; later hops GPU ${gpu.cascade?.hop2 ?? "n/a"}, CPU ${cpu.cascade?.hop2 ?? "n/a"}`,
+    );
+    for (const [label, r] of [["GPU", gpu], ["CPU", cpu]]) {
+      const cells = hop1(r);
+      if (cells.length < 3) failures.push(`${label}: only ${cells.length} cells fired at hop 1, expected at least 3`);
+      const reachedSet = new Set(r.firstHop);
+      const stray = cells.filter((n) => !reachedSet.has(n));
+      if (stray.length) failures.push(`${label}: hop-1 cells the hero never reached [${stray}]`);
+    }
     if (gpu.problems.length || cpu.problems.length) failures.push("console errors or THREE warnings");
     if (failures.length) {
       console.error(`FAIL: ${failures.join("; ")}`);
