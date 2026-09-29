@@ -36,6 +36,12 @@ import { AHEAD_UM, RideCamera } from "./camera/ride";
 import { createHudFrame, updateHudFrame, type HudFrame } from "./camera/view";
 import type { Stick } from "./camera/touch";
 // --- end r1/nav ---
+// --- r3/links: shareable links ---
+import { LinkSync, decodeView, lookAngles, lookDirection, type ViewState } from "./share";
+// --- end r3/links ---
+// --- r3/links TEMP: only for the jump stand-in below ---
+import { Flight, poseAround } from "./camera/goto";
+// --- end r3/links TEMP ---
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -69,6 +75,12 @@ export interface App {
   /** Touch pad input: left stick moves, right stick looks. */
   setSticks(move: Stick, look: Stick): void;
   // --- end r1/nav ---
+  // --- r3/links ---
+  /** The current view as a link: writes the URL hash now, then returns `location.href`. */
+  shareUrl(): string;
+  /** Camera position in µm. The array is reused; read it, do not keep it. */
+  cameraPosition(): readonly [number, number, number];
+  // --- end r3/links ---
 }
 
 export interface CmmDebug {
@@ -109,6 +121,10 @@ export interface CmmDebug {
   selected: number;
   ride: string;
   // --- end r1/nav ---
+  // --- r3/links ---
+  /** The camera and selection as a link would carry them (`share.ts`). Absent in a scripted shot. */
+  view?: () => ViewState;
+  // --- end r3/links ---
 }
 
 declare global {
@@ -306,6 +322,59 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const rideDir = new Vector3();
   const heroNdc = new Vector3();
   // --- end r1/nav ---
+
+  // --- r3/links: the URL hash carries the camera and the selection (share.ts) ---
+  const linkDir = new Vector3();
+  const currentView = (): ViewState => {
+    camera.getWorldDirection(linkDir);
+    const { yaw, pitch } = lookAngles(linkDir.x, linkDir.y, linkDir.z);
+    return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw, pitch, neuron: selected };
+  };
+  // A scripted shot keeps its own camera and its own URL.
+  const link = scripted || !controls
+    ? null
+    : new LinkSync({
+        getView: currentView,
+        count: data.neurons.count,
+        // replaceState, never pushState: the address bar follows the view without filling the back button.
+        write: (hash) => history.replaceState(history.state, "", `${location.pathname}${location.search}#${hash}`),
+      });
+  /** Put the camera where a link says, at once and with no flight. */
+  const placeCamera = (v: ViewState) => {
+    ride.cancel();
+    camera.position.set(v.x, v.y, v.z);
+    const [dx, dy, dz] = lookDirection(v.yaw, v.pitch);
+    controls?.lookAt(linkDir.set(v.x + dx, v.y + dy, v.z + dz));
+  };
+  const restored = link ? decodeView(location.hash, data.neurons.count) : null;
+  if (restored) placeCamera(restored);
+  bus.on("select", () => link?.flush());
+  bus.on("tour", (e) => link?.pause(e.running));
+  // A link pasted into this tab's address bar changes only the hash, so the page does not reload.
+  const onHashChange = () => {
+    const v = decodeView(location.hash, data.neurons.count);
+    if (!v) return;
+    placeCamera(v);
+    if (v.neuron !== selected) bus.emit("select", { neuron: v.neuron });
+  };
+  if (link) window.addEventListener("hashchange", onHashChange);
+  const cameraPos: [number, number, number] = [0, 0, 0];
+  // --- end r3/links ---
+
+  // --- r3/links TEMP: stand-in for the canonical jump handler (tour builder). Delete at merge. ---
+  const tempFlight = new Flight(camera, controls);
+  const tempPose = { position: new Vector3(), target: new Vector3() };
+  const tempAway = new Vector3();
+  const tempSoma = new Vector3();
+  bus.on("jump", ({ neuron }) => {
+    ride.cancel();
+    tempSoma.fromArray(somaPos, neuron * 3);
+    tempAway.copy(camera.position).sub(tempSoma);
+    if (tempAway.lengthSq() < 1e-6) tempAway.set(1, 0, 0);
+    poseAround(tempSoma, tempAway.normalize(), 120, tempPose);
+    tempFlight.start(tempPose, undefined, () => bus.emit("select", { neuron }));
+  });
+  // --- end r3/links TEMP ---
   const heroNeuron = hero.neuron;
   // --- r1-audio: synthesised spatial sound, subscribed to the bus ---
   const audio: AudioEngine = createAudio({ bus, dataset: data, getCamera: () => camera });
@@ -341,6 +410,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     // --- end sim ---
     selected: -1,
     ride: "idle",
+    view: scripted ? undefined : currentView, // r3/links
   };
   window.__cmm = debug;
 
@@ -431,6 +501,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       camera.lookAt(pose.target);
     } else {
       simTime += dt;
+      tempFlight.update(dt); // r3/links TEMP
       // --- r1/nav: the ride owns the camera while it runs, FlyControls otherwise ---
       if (!ride.update(simTime, dt)) controls?.update(dt);
       // --- end r1/nav ---
@@ -467,6 +538,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     debug.selected = selected;
     debug.ride = ride.state;
     // --- end r1/nav ---
+    link?.update(now); // r3/links
 
     post.render();
     debug.frame++;
@@ -487,6 +559,9 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   // --- r1/nav ---
   if (opts.select === "hero") bus.emit("select", { neuron: hero.neuron });
   // --- end r1/nav ---
+  // --- r3/links ---
+  if (restored && restored.neuron >= 0) bus.emit("select", { neuron: restored.neuron });
+  // --- end r3/links ---
 
   return {
     isWebGPU,
@@ -498,11 +573,24 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     cancelRide: () => ride.cancel(),
     setSticks: (move, look) => controls?.setSticks(move, look),
     // --- end r1/nav ---
+    // --- r3/links ---
+    shareUrl: () => {
+      link?.flush();
+      return location.href;
+    },
+    cameraPosition: () => {
+      cameraPos[0] = camera.position.x;
+      cameraPos[1] = camera.position.y;
+      cameraPos[2] = camera.position.z;
+      return cameraPos;
+    },
+    // --- end r3/links ---
     dispose() {
       // --- r1/nav ---
       ride.dispose();
       picker.dispose();
       // --- end r1/nav ---
+      window.removeEventListener("hashchange", onHashChange); // r3/links
       disposed = true;
       abort.abort();
       void renderer.setAnimationLoop(null);
