@@ -66,11 +66,15 @@ export class Flight {
     if (this.controls) this.controls.enabled = false;
   }
 
+  /** Stops mid-flight. The controls take over looking wherever the camera looks now, with no snap. */
   cancel(): void {
     if (!this.running) return;
     this.running = false;
     this.onDone = null;
-    this.handBack();
+    if (!this.controls) return;
+    this.camera.getWorldDirection(this.dir);
+    this.controls.lookAt(this.dir.add(this.camera.position));
+    this.controls.enabled = true;
   }
 
   /** Advances the flight. Returns true while it owns the camera. */

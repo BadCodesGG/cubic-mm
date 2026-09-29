@@ -57,7 +57,7 @@ import {
 } from "./model";
 
 /** Most arrivals from the watched (visitor-stimulated) cell or from driven spikes kept per frame. */
-export const WATCH_CAP = 512;
+export const WATCH_CAP = 4096;
 const FIXED_ONE = 65536;
 const HEADER = 4;
 /** Readbacks in flight at once before a frame's events are dropped rather than queued. */

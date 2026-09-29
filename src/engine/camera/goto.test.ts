@@ -70,3 +70,21 @@ describe("Flight", () => {
     expect(steps).toBeLessThanOrEqual(41);
   });
 });
+
+describe("Flight.cancel", () => {
+  it("hands the controls a look along the camera's current direction, not the destination", () => {
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 0);
+    camera.lookAt(0, 0, -1);
+    const looks: Vector3[] = [];
+    const controls = { enabled: true, lookAt: (t: Vector3) => looks.push(t.clone()) } as unknown as import("./fly").FlyControls;
+    const flight = new Flight(camera, controls);
+    flight.start({ position: new Vector3(200, 0, 0), target: new Vector3(200, 0, 300) }, 2);
+    flight.update(0.5);
+    const mid = camera.getWorldDirection(new Vector3());
+    flight.cancel();
+    expect(controls.enabled).toBe(true);
+    const handed = looks[looks.length - 1].sub(camera.position).normalize();
+    expect(handed.dot(mid)).toBeCloseTo(1, 5);
+  });
+});
