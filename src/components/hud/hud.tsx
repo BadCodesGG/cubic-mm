@@ -9,6 +9,9 @@ import { TouchPad } from "./touch-pad";
 import { Search } from "./search";
 import { CopyLink } from "./share";
 // --- end r3/links ---
+// --- r3/cascade ---
+import { CascadePanel } from "./cascade";
+// --- end r3/cascade ---
 import { useCoarsePointer, useHudFrame, useMedia, useReducedMotion, useSelection, useStatus, type FrameSnap } from "./use-hud";
 // --- r3/tour ---
 import { useTourRunning } from "./use-hud";
@@ -271,6 +274,9 @@ export function Hud({ app }: { app: App }) {
         ) : (
           <SummaryPanel app={app} view={view} actions={<CopyLink app={app} />} /* r3/links */ />
         )}
+        {/* --- r3/cascade */}
+        <CascadePanel app={app} selected={selected} />
+        {/* --- end r3/cascade */}
       </div>
 
       {aboutOpen ? null : (
