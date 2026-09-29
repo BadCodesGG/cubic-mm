@@ -26,6 +26,8 @@ CELL_TABLE = CACHE / "aibs_cell_info.csv.gz"
 CELL_HEADER = CACHE / "aibs_cell_info_header.csv"
 LISTING = CACHE / "proofread_listing.json"
 SELECTION = CACHE / "selection.json"
+SYNAPSES_CSV = CACHE / "synapses_selected.csv"
+SYNAPSES_STATE = CACHE / "synapses_selected.json"
 
 # EM info bounds in nm (min, max), used as the global quantisation bounds.
 BOUNDS_NM = ([110592, 110592, 592640], [1814528, 1552384, 1116160])
