@@ -4,6 +4,12 @@
  *   npm run build && node scripts/shot.mjs [--synth] [--t=1.45] [--webgl] [--name=hero] [--port=3117] [--sim=cpu]
  *     [--quality=hi|lite|auto] [--pieces=1|2|3] [--mobile] [--live] [--frames=10] [--uncapped] [--gpu-timing] [--budgetMs=20]
  *
+ * --hash=<c=...&n=...&v=...> opens a shareable link (implies nothing else: pair it with --live, since a
+ * scripted shot keeps its own camera). --query=a=b&c=d adds URL parameters, e.g. --query=select=hero.
+ * --clean hides the HUD, loader and sound button for the capture (the hero still is taken this way).
+ * --type=<text> (with --live) presses "/" and types into the cell search before the capture; --enter
+ * then presses Enter and waits for the flight. The camera view and the address-bar hash are printed.
+ *
  * --quality / --pieces pin the render tier (default: the scripted shot's own, hi/2 on WebGPU).
  * --budgetMs lowers the adaptive frame budget (with --live), to watch the tier step down.
  * --mobile emulates a 390x844 phone (DPR 3, touch, coarse pointer, a phone user agent) and also
@@ -55,7 +61,9 @@ const simMode = value("sim", null);
 if (simMode) query.set("sim", simMode);
 const t = value("t", null);
 if (t) query.set("t", t);
-const url = `${BASE}/?${query}`;
+for (const [k, v] of new URLSearchParams(value("query", ""))) query.set(k, v);
+const linkHash = value("hash", "");
+const url = `${BASE}/?${query}${linkHash ? `#${linkHash}` : ""}`;
 
 const GPU_ARGS = ["--enable-unsafe-webgpu", "--enable-features=Vulkan,UseSkiaRenderer", "--use-angle=d3d11", "--ignore-gpu-blocklist"];
 // --uncapped: frames are not held to the display's refresh, so the frame time measures the GPU work.
@@ -143,9 +151,22 @@ async function attempt(strategy) {
     await page.waitForFunction((f) => window.__cmm.frame > f, (await page.evaluate(() => window.__cmm.frame)) + extra, {
       timeout: 120_000,
     });
+    const typed = value("type", null);
+    if (typed !== null) {
+      await page.keyboard.press("/");
+      await page.keyboard.type(typed, { delay: 30 });
+      await page.waitForTimeout(400);
+      if (flag("enter")) {
+        await page.keyboard.press("Enter");
+        await page.waitForTimeout(6000);
+      }
+    }
     const info = await page.evaluate(() => ({ ...window.__cmm }));
+    info.viewNow = await page.evaluate(() => window.__cmm.view?.());
+    info.hashNow = await page.evaluate(() => location.hash);
     if (mobile) info.layout = await page.evaluate(layoutReport);
     if (!wantWebGL && !info.isWebGPU) return { ok: false, info, errors, threeWarnings, reason: "fell back to WebGL2" };
+    if (flag("clean")) await page.addStyleTag({ content: "main > :not(canvas) { visibility: hidden !important; }" });
     const out = await nextShotPath();
     await page.screenshot({ path: out });
     return { ok: true, info, errors, threeWarnings, out };
@@ -182,6 +203,7 @@ try {
       (info.sim ? `sim ${info.sim.mode}${info.sim.syntheticSynapses ? " (synthetic synapses)" : ""} on ${info.sim.synapses} synapses, ` : "") +
       `hero neuron ${info.hero.neuron} at ${info.hero.distanceUm.toFixed(0)} µm, on screen at ${info.hero.screen.map((v) => v.toFixed(0)).join(",")}`,
   );
+  if (info.viewNow) console.log(`  view ${JSON.stringify(info.viewNow)}, selected ${info.selected}, hash ${info.hashNow || "(none)"}`);
   if (info.quality) {
     const q = info.quality;
     console.log(`  quality ${q.tier}/${q.pieces} (${q.instances} instances${q.adapted ? ", adapted down" : ""}), sim ${info.sim?.rateHz.toFixed(2)} Hz/neuron`);

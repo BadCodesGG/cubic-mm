@@ -44,6 +44,9 @@ import { markTourSeen, readTourSeen } from "./prefs";
 import { Tour, shouldRunTour } from "./tour";
 import { captureFrame, downloadBlob, shotFilename } from "./screenshot";
 // --- end r3/tour
+// --- r3/links: shareable links ---
+import { LinkSync, decodeView, lookAngles, lookDirection, type ViewState } from "./share";
+// --- end r3/links ---
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -100,6 +103,12 @@ export interface App {
   /** Called after each screenshot with its filename, or null if it could not be taken. */
   onScreenshot(listener: (filename: string | null) => void): () => void;
   // --- end r3/tour
+  // --- r3/links ---
+  /** The current view as a link: writes the URL hash now, then returns `location.href`. */
+  shareUrl(): string;
+  /** Camera position in µm. The array is reused; read it, do not keep it. */
+  cameraPosition(): readonly [number, number, number];
+  // --- end r3/links ---
 }
 
 export interface CmmDebug {
@@ -146,6 +155,10 @@ export interface CmmDebug {
   timeScale?: number;
   tour?: { running: boolean; time: number };
   // --- end r3/tour
+  // --- r3/links ---
+  /** The camera and selection as a link would carry them (`share.ts`). Absent in a scripted shot. */
+  view?: () => ViewState;
+  // --- end r3/links ---
 }
 
 declare global {
@@ -343,6 +356,45 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const rideDir = new Vector3();
   const heroNdc = new Vector3();
   // --- end r1/nav ---
+
+  // --- r3/links: the URL hash carries the camera and the selection (share.ts) ---
+  const linkDir = new Vector3();
+  const currentView = (): ViewState => {
+    camera.getWorldDirection(linkDir);
+    const { yaw, pitch } = lookAngles(linkDir.x, linkDir.y, linkDir.z);
+    return { x: camera.position.x, y: camera.position.y, z: camera.position.z, yaw, pitch, neuron: selected };
+  };
+  // A scripted shot keeps its own camera and its own URL.
+  const link = scripted || !controls
+    ? null
+    : new LinkSync({
+        getView: currentView,
+        count: data.neurons.count,
+        // replaceState, never pushState: the address bar follows the view without filling the back button.
+        write: (hash) => history.replaceState(history.state, "", `${location.pathname}${location.search}#${hash}`),
+      });
+  /** Put the camera where a link says, at once and with no flight. */
+  const placeCamera = (v: ViewState) => {
+    ride.cancel();
+    camera.position.set(v.x, v.y, v.z);
+    const [dx, dy, dz] = lookDirection(v.yaw, v.pitch);
+    controls?.lookAt(linkDir.set(v.x + dx, v.y + dy, v.z + dz));
+  };
+  const restored = link ? decodeView(location.hash, data.neurons.count) : null;
+  if (restored) placeCamera(restored);
+  bus.on("select", () => link?.flush());
+  bus.on("tour", (e) => link?.pause(e.running));
+  // A link pasted into this tab's address bar changes only the hash, so the page does not reload.
+  const onHashChange = () => {
+    const v = decodeView(location.hash, data.neurons.count);
+    if (!v) return;
+    placeCamera(v);
+    if (v.neuron !== selected) bus.emit("select", { neuron: v.neuron });
+  };
+  if (link) window.addEventListener("hashchange", onHashChange);
+  const cameraPos: [number, number, number] = [0, 0, 0];
+  // --- end r3/links ---
+
   const heroNeuron = hero.neuron;
   // --- r1-audio: synthesised spatial sound, subscribed to the bus ---
   const audio: AudioEngine = createAudio({ bus, dataset: data, getCamera: () => camera });
@@ -378,6 +430,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     // --- end sim ---
     selected: -1,
     ride: "idle",
+    view: scripted ? undefined : currentView, // r3/links
   };
   window.__cmm = debug;
 
@@ -629,6 +682,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       takeScreenshot();
     }
     // --- end r3/tour
+    link?.update(now); // r3/links
 
     post.render();
     debug.frame++;
@@ -652,6 +706,9 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   // --- r1/nav ---
   if (opts.select === "hero") bus.emit("select", { neuron: hero.neuron });
   // --- end r1/nav ---
+  // --- r3/links ---
+  if (restored && restored.neuron >= 0) bus.emit("select", { neuron: restored.neuron });
+  // --- end r3/links ---
 
   return {
     isWebGPU,
@@ -677,11 +734,24 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       return () => shotListeners.delete(listener);
     },
     // --- end r3/tour
+    // --- r3/links ---
+    shareUrl: () => {
+      link?.flush();
+      return location.href;
+    },
+    cameraPosition: () => {
+      cameraPos[0] = camera.position.x;
+      cameraPos[1] = camera.position.y;
+      cameraPos[2] = camera.position.z;
+      return cameraPos;
+    },
+    // --- end r3/links ---
     dispose() {
       // --- r1/nav ---
       ride.dispose();
       picker.dispose();
       // --- end r1/nav ---
+      window.removeEventListener("hashchange", onHashChange); // r3/links
       disposed = true;
       // --- r3/tour ---
       for (const type of TOUR_INPUT) window.removeEventListener(type, onTourInput, { capture: true });
