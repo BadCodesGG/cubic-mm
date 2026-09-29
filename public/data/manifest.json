@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "boundsUm": {
+    "min": [
+      110.592,
+      110.592,
+      592.64
+    ],
+    "max": [
+      1814.528,
+      1552.384,
+      1116.16
+    ]
+  },
+  "neuronCount": 200,
+  "cellTypes": [
+    "23P",
+    "4P",
+    "5P-IT",
+    "BC",
+    "BPC",
+    "MC"
+  ],
+  "neurons": "neurons.bin",
+  "lods": {
+    "hi": {
+      "nodeCount": 281508,
+      "chunks": [
+        {
+          "file": "chunks/hi/0.bin",
+          "nodeStart": 0,
+          "nodeCount": 99002,
+          "neuronCount": 74,
+          "bboxUm": {
+            "min": [
+              366.825,
+              336.645,
+              593.998
+            ],
+            "max": [
+              1592.225,
+              1091.675,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/1.bin",
+          "nodeStart": 99002,
+          "nodeCount": 99007,
+          "neuronCount": 66,
+          "bboxUm": {
+            "min": [
+              400.782,
+              317.549,
+              593.998
+            ],
+            "max": [
+              1444.205,
+              1120.012,
+              1114.211
+            ]
+          }
+        },
+        {
+          "file": "chunks/hi/2.bin",
+          "nodeStart": 198009,
+          "nodeCount": 83499,
+          "neuronCount": 60,
+          "bboxUm": {
+            "min": [
+              402.264,
+              329.253,
+              593.998
+            ],
+            "max": [
+              1520.724,
+              1114.138,
+              1114.283
+            ]
+          }
+        }
+      ]
+    },
+    "lite": {
+      "nodeCount": 204673,
+      "chunks": [
+        {
+          "file": "chunks/lite/0.bin",
+          "nodeStart": 0,
+          "nodeCount": 71426,
+          "neuronCount": 74,
+          "bboxUm": {
+            "min": [
+              366.825,
+              336.645,
+              593.998
+            ],
+            "max": [
+              1592.225,
+              1091.675,
+              1114.283
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/1.bin",
+          "nodeStart": 71426,
+          "nodeCount": 72514,
+          "neuronCount": 66,
+          "bboxUm": {
+            "min": [
+              400.782,
+              317.549,
+              593.998
+            ],
+            "max": [
+              1444.205,
+              1120.012,
+              1114.203
+            ]
+          }
+        },
+        {
+          "file": "chunks/lite/2.bin",
+          "nodeStart": 143940,
+          "nodeCount": 60733,
+          "neuronCount": 60,
+          "bboxUm": {
+            "min": [
+              402.264,
+              329.253,
+              593.998
+            ],
+            "max": [
+              1520.724,
+              1114.138,
+              1114.283
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "synapses": null,
+  "credits": {
+    "dataset": "MICrONS minnie65 (cubic millimetre of mouse visual cortex), proofread skeletons v1300 and aibs_cell_info",
+    "licence": "CC BY 4.0",
+    "url": "https://www.microns-explorer.org/cortical-mm3",
+    "citations": [
+      "The MICrONS Consortium. Functional connectomics spanning multiple areas of mouse visual cortex. Nature 640, 435-447 (2025). https://doi.org/10.1038/s41586-025-08790-w"
+    ]
+  }
+}
