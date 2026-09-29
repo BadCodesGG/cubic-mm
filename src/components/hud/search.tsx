@@ -23,7 +23,9 @@ export function Search({ app }: { app: App }) {
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
 
-  const result = useMemo(() => search(app.data, query, app.cameraPosition()), [app, query, stamp]);
+  // The camera position is sampled when the box gains focus (`stamp`), not on every keystroke.
+  const origin = useMemo(() => [...app.cameraPosition()] as [number, number, number], [app, stamp]);
+  const result = useMemo(() => search(app.data, query, origin), [app, query, origin]);
   // A chip for a kind of cell this dataset does not hold would do nothing, so it is disabled.
   const chips = useMemo(() => QUICK_QUERIES.map((q) => ({ q, found: search(app.data, q, [0, 0, 0], { limit: 1 }).total > 0 })), [app]);
   const { hits, total } = result;
