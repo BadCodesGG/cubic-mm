@@ -43,7 +43,7 @@ Synapses: `pre`/`post` are neuron indices, `pos` is the centre point in um (voxe
 `preDistQ` is the path distance of the nearest full-resolution axon node of the presynaptic neuron
 (nearest node of any compartment when none is within 5 um), `size` is
 `round(255 * log1p(size) / log1p(maxSize))`. Synapses whose presynaptic neuron has no axon nodes are
-dropped. Autapses (pre == post) are kept.
+dropped. Autapses (pre == post) are dropped, and the log line says how many.
 
 Layers: excitatory from `cell_type` (23P 2, 4P 4, 5P-* 5, 6P-* 6); everything else from soma depth
 (y, pia at low y) against y bands computed from all matched excitatory cells.
