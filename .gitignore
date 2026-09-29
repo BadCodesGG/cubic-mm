@@ -45,11 +45,8 @@ next-env.d.ts
 __pycache__/
 pipeline/cache/
 
-# agent worktrees
-.claude/worktrees/
+# local worktrees, plans and screenshots
+.claude/
 
 # playwright
 test-results/
-
-# screenshots from scripts/shot.mjs
-.claude/shots/

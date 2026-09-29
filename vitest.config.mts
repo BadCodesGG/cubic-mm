@@ -6,7 +6,7 @@ export default defineConfig({
     alias: { "@": path.resolve(import.meta.dirname, "./src") },
   },
   test: {
-    // Agent worktrees are full checkouts of other branches; their copies of the tests are not ours.
-    exclude: [...configDefaults.exclude, ".claude/worktrees/**"],
+    // Worktrees under .claude/ are other checkouts of this repo; their tests are not ours.
+    exclude: [...configDefaults.exclude, ".claude/**"],
   },
 });

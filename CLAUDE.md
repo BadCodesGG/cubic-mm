@@ -48,7 +48,5 @@ Type-check with `npx tsc --noEmit`. Python is only ever the venv at `.venv/Scrip
 - **`PCFSoftShadowMap` is gone in r186.** There are no shadows in this scene anyway.
 - **Data is coordinates in µm; y is depth (pia at low y).** Positions are quantised u16 against
   `manifest.boundsUm`; path distance is quarter-µm u16; radius is nm u16.
-- **Pushes are blocked by a local pre-push hook** during multi-agent work. Set `ALLOW_PUSH=1` only
-  for a deliberate push, once per unit of work.
 - **Credits are not optional.** The MICrONS data is CC BY 4.0; the manifest carries the citation
   and `/about` must show it.

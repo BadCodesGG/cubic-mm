@@ -10,8 +10,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Agent worktrees: full checkouts of other branches, each linted from its own root.
-    ".claude/worktrees/**",
+    // Worktrees under .claude/ are other checkouts of this repo, each linted from its own root.
+    ".claude/**",
     ".venv/**",
   ]),
 ]);

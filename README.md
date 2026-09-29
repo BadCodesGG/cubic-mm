@@ -1,55 +1,93 @@
 # One Cubic Millimetre
 
-A walkable, first-person experience inside the MICrONS minnie65 cubic millimetre of mouse visual
-cortex: 1,711 real proofread neurons drawn as glowing ribbons, with a spiking simulation running over
-their 156,882 real synapses. Click a cell, watch the signal travel down its axon, and ride a spike.
+**Walk through a real cubic millimetre of mouse brain.**
+1,711 real neurons, 156,882 real synapses, and a live spiking simulation you can set off, running on WebGPU in the browser.
 
-![Ribbons of neurons in the volume, one axon carrying a bright pulse](public/hero-still.jpg)
+**Live: [cubic-mm.vercel.app](https://cubic-mm.vercel.app)**
 
-The wiring is measured; the dynamics on it are a toy (leaky integrate-and-fire point neurons, Poisson
-background drive). The site's `/about` page says which is which.
+![Ribbons of neurons filling a dark volume, one axon carrying a bright pulse](public/hero-still.jpg)
 
-WebGPU first (three.js r186 `WebGPURenderer`, the simulation as TSL compute), with a lite WebGL2 mode
-that runs the same model in a Web Worker. Built with Next.js 16 and Claude Code.
+The data is the [MICrONS](https://www.microns-explorer.org/cortical-mm3) minnie65 volume: a cubic millimetre of mouse visual cortex, the only piece of brain ever mapped down to every synapse. The proofread skeletons of 1,711 of its neurons are rendered as glowing ribbons at true scale, and a leaky integrate-and-fire model runs over 156,882 of their real synapses. Click a cell and stimulate it, watch the signal travel down its actual axon, see which cells it fires, and ride the spike into the next one. Every spike is a synthesised sound placed in 3D.
 
-## Commands
+The wiring is measured. The dynamics on it are a toy, and the site's [about page](https://cubic-mm.vercel.app/about) says exactly which is which.
 
-```bash
-npm run dev          # Dev server at http://localhost:3000
-npm run build        # Production build (the real gate; dev mode hides prerender problems)
-npm run lint         # ESLint
-npm run test         # Vitest: format round-trips, data integrity of public/data, the CPU sim
-npm run test:smoke   # Boots the built site on port 3132 and drives it in Chromium with WebGPU on and off
-npm run data:check   # Re-packs from pipeline/cache and fails if public/data is stale
+## What you can do
+
+| | |
+|---|---|
+| **Fly** | WASD and the mouse, `Shift` to go faster. On a phone, two thumbsticks. |
+| **Select a cell** | Click a soma. The panel shows its type, layer, depth below the pia, cable length, synapse counts and MICrONS root id. |
+| **Stimulate it** | `Space`. The spike leaves the soma, runs down the real axon at 0.5 m/s slowed 1000x, and lights up the cells it reaches. |
+| **Watch the cascade** | Lines draw from each driver to each cell it fired; the panel counts hops and shows an 8 s timeline. |
+| **Ride the spike** | `R`. The camera drops onto the pulse, follows it to a synapse, and crosses into the next cell. |
+| **Search** | `/`. Root id, type code (`4P`, `BC`, `MC`), `inhibitory`, `layer 5`, or a chip like "a Martinotti cell". |
+| **Share the view** | The address bar always holds the camera and selection. Copy link, send it, they see what you see. |
+| **Slow time** | `,` for 0.1x, `.` for normal, Pause in the HUD. The camera stays live. |
+| **Screenshot** | `P` saves a 3200 px PNG with the HUD hidden, named after the selected cell. |
+| **Home** | `H` flies back to the start. The minimap shows where you are in the volume. |
+
+A 20 s intro plays on the first visit and can be replayed from the About panel. Sound is off until you turn it on.
+
+## How it works
+
+```
+pipeline/            Python + numpy. Fetches the public MICrONS files, streams the 20 GB synapse
+                     table once, decimates the skeletons to two detail tiers, packs 24 MB of binary.
+public/data/         The packed dataset, committed, so the site runs without Python.
+src/engine/          The experience, plain TypeScript, no framework in the hot path.
+  format.ts          The binary contract the pipeline writes and the browser reads.
+  sim/               Leaky integrate-and-fire: TSL compute kernels on WebGPU, and the identical
+                     model in a Web Worker for the WebGL2 fallback.
+  scene/             Instanced ribbons, somas, pulse fronts, cascade lines, bloom, haze.
+  camera/            Fly controls, the ride-a-spike camera, eased flights, the intro tour.
+  audio/             Web Audio synthesis: one HRTF-panned grain per spike, no samples.
+src/components/      The React HUD, panels, search, minimap and the about page.
+scripts/             Smoke test, GPU/CPU parity check, reproducible screenshots.
 ```
 
-Type-check with `npx tsc --noEmit`.
+**Rendering.** three.js r186 on the `WebGPURenderer`, materials written in TSL so one shader graph serves both backends. Every skeleton edge is an instanced, view-aligned ribbon; the spike glow is a travelling front computed from each node's path distance to the soma, so a small buffer of spike times animates over two million segments with no per-frame CPU work. Post-processing is bloom, grain and vignette through the `RenderPipeline`.
 
-`npm run test:smoke` needs a build first and Playwright's Chromium (`npx playwright install chromium`).
-It checks the GPU simulation, a stimulate-and-ride interaction, the WebGL2 fallback, `/about`, the social
-image, and finishes with `scripts/parity.mjs` (GPU against CPU spike statistics). On a machine without a
-GPU pass `--allow-software`: `npm run test:smoke -- --allow-software`. `NEXT_PUBLIC_SITE_URL` sets the
-origin used in social cards.
+**Simulation.** Each frame a synapse kernel (one thread per synapse) checks the presynaptic cell's last eight spike times for a pulse landing in this step and accumulates the weight into the target with an atomic add; a neuron kernel integrates, thresholds, and writes spike times back into the buffer the ribbons read. A visitor's stimulus is delivered with extra gain that decays hop by hop, so a cascade is visible; the background dynamics are untouched. `scripts/parity.mjs` proves the GPU and CPU paths agree.
 
-## Data pipeline
+**Quality tiers.** The app starts at the highest detail the device is likely to hold and steps down (fewer curve pieces, then the coarser skeleton tier) if the measured frame time says so, without mistaking a 30 Hz display for a slow GPU. Browsers without WebGPU get the WebGL2 renderer and the worker simulation.
 
-`public/data/` is committed, so the site runs without Python. To regenerate it, use the repo venv
-(`.venv/Scripts/python`, Python with numpy):
+## Running it
+
+```bash
+npm install
+npm run dev            # http://localhost:3000
+```
+
+Checks:
+
+```bash
+npx tsc --noEmit       # types
+npm run lint           # ESLint
+npm run test           # Vitest: data format, data integrity, the CPU model, camera and HUD logic
+npm run build          # production build
+npm run test:smoke     # boots the build, drives it in Chromium with WebGPU on and off, runs parity
+```
+
+The smoke test needs a build first and Playwright's Chromium (`npx playwright install chromium`). On a machine without a GPU, `npm run test:smoke -- --allow-software`. `NEXT_PUBLIC_SITE_URL` sets the origin used in the social cards.
+
+### Regenerating the data
+
+`public/data/` is committed. To rebuild it from the public MICrONS files (Python 3 with numpy in a venv at `.venv`):
 
 ```bash
 .venv/Scripts/python pipeline/fetch.py --count all   # skeletons and the cell table into pipeline/cache/
-.venv/Scripts/python pipeline/synapses.py            # streams the 337 M row synapse table once
-.venv/Scripts/python pipeline/pack.py                # writes public/data/
+.venv/Scripts/python pipeline/synapses.py            # streams the 337 M row synapse table once, resumable
+.venv/Scripts/python pipeline/pack.py                # writes public/data/; --check fails if it is stale
 ```
 
-`pipeline/README.md` has the details: decimation (2.0 µm / 28 µm for the full detail, 8 µm / 150 µm and
-short twigs pruned for lite), the synapse filtering, and the binary format shared with
-`src/engine/format.ts`.
+[`pipeline/README.md`](pipeline/README.md) documents the decimation, the synapse filtering, and the binary layout shared with `src/engine/format.ts`.
 
-## Licence and citation
+## Data and licence
 
-Neuron skeletons, cell types and synapses: MICrONS Consortium, CC BY 4.0,
-<https://www.microns-explorer.org/cortical-mm3>.
+The neuron skeletons, cell types and synapses come from the MICrONS Consortium and are licensed **CC BY 4.0**.
 
-> The MICrONS Consortium. Functional connectomics spanning multiple areas of mouse visual cortex.
-> Nature 640, 435-447 (2025). https://doi.org/10.1038/s41586-025-08790-w
+> The MICrONS Consortium. Functional connectomics spanning multiple areas of mouse visual cortex. *Nature* 640, 435-447 (2025). https://doi.org/10.1038/s41586-025-08790-w
+
+The code is MIT, see [LICENSE](LICENSE).
+
+Built by [BadCodes](https://badcodes.dev).
