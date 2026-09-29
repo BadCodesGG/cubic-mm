@@ -70,6 +70,12 @@ interface Backend {
   dispose(): void;
 }
 
+/** True for a batch whose every event happened before t = 0 (the silent warm-up). */
+function isWarmup(batch: GpuEvents): boolean {
+  if (batch.spikes.length === 0 && batch.arrivals.length === 0) return false;
+  return batch.spikes.every((s) => s.time < 0) && batch.arrivals.every((a) => a.time < 0);
+}
+
 export function createSimulation(opts: SimulationOptions): Simulation {
   const { dataset, bus, seed } = opts;
   const neuronCount = dataset.neurons.count;
@@ -94,7 +100,6 @@ export function createSimulation(opts: SimulationOptions): Simulation {
   const warmSteps = Math.round(WARMUP_S / MAX_SUBSTEP);
   for (let i = 1; i <= warmSteps; i++) backend.substep(-WARMUP_S + i * MAX_SUBSTEP, MAX_SUBSTEP);
   backend.endFrame();
-  let discard = 1;
 
   const counts = new Uint32Array(neuronCount);
   const reached = new Set<number>();
@@ -105,11 +110,9 @@ export function createSimulation(opts: SimulationOptions): Simulation {
   const stats = { spikes: 0, stimulated: 0, rateHz: 0 };
 
   const report = (batch: GpuEvents) => {
-    let latest = lastTime;
     for (const s of batch.spikes) {
       counts[s.neuron]++;
       if (s.stimulated) stats.stimulated++;
-      if (s.time > latest) latest = s.time;
       bus.emit("spike", s);
     }
     for (const a of batch.arrivals) {
@@ -119,8 +122,11 @@ export function createSimulation(opts: SimulationOptions): Simulation {
       bus.emit("arrive", { pre, post, synapse: a.synapse, time: a.time });
     }
     stats.spikes += batch.spikeCount;
-    lastTime = latest;
     recent.push([lastTime, batch.spikeCount]);
+  };
+
+  /** The rate window follows simulation time, so a silent stretch decays the reading to zero. */
+  const updateRate = () => {
     while (recent.length && recent[0][0] < lastTime - RATE_WINDOW_S) recent.shift();
     const inWindow = recent.reduce((sum, [, c]) => sum + c, 0);
     stats.rateHz = inWindow / Math.min(RATE_WINDOW_S, Math.max(lastTime, 1e-3)) / Math.max(1, neuronCount);
@@ -143,13 +149,14 @@ export function createSimulation(opts: SimulationOptions): Simulation {
         for (let i = 1; i <= n; i++) backend.substep(t - dt + (dt * i) / n, dt / n);
         backend.endFrame();
       }
+      lastTime = Math.max(lastTime, t);
       for (const batch of backend.drain()) {
-        if (discard > 0) {
-          discard--;
-          continue;
-        }
+        // The warm-up ran before t = 0. Its batch is recognised by its contents rather than by
+        // arriving first: GPU readbacks can resolve out of order or be dropped under load.
+        if (isWarmup(batch)) continue;
         report(batch);
       }
+      updateRate();
     },
     stimulate(neuron, amount = STIMULUS) {
       if (neuron !== watched) reached.clear();

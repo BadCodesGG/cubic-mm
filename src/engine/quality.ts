@@ -70,6 +70,8 @@ export interface BudgetOptions {
   budgetMs?: number;
 }
 
+/** A round whose mean sits within this of its shortest frame is pinned to the display's refresh, not slow. */
+const PINNED_SLACK_MS = 2;
 /** A gap this long is the tab being hidden or the device asleep, not a slow frame. */
 const GAP_MS = 1000;
 
@@ -86,6 +88,7 @@ export class FrameBudget {
   private count = 0;
   private sum = 0;
   private settled = false;
+  private refreshMs = Infinity;
 
   constructor({ warmup = 30, samples = 90, budgetMs = 20 }: BudgetOptions = {}) {
     this.warmup = warmup;
@@ -98,12 +101,20 @@ export class FrameBudget {
     return this.count ? this.sum / this.count : 0;
   }
 
+  /**
+   * `ms` is the wall-clock frame interval, which is only evidence of a slow renderer when it is
+   * not simply the display's refresh period: a 30 Hz screen delivers 33 ms frames with the GPU
+   * idle. The shortest interval of the round stands in for the refresh period, and the round is
+   * slow only when its mean is clearly past that too (missed vsyncs), so a fast GPU on a slow
+   * display never steps down.
+   */
   push(ms: number): BudgetVerdict {
     if (this.settled) return "done";
     if (this.seen++ < this.warmup || ms > GAP_MS) return "sampling";
+    if (ms < this.refreshMs) this.refreshMs = ms;
     this.sum += ms;
     if (++this.count < this.samples) return "sampling";
-    if (this.meanMs > this.budgetMs) return "slow";
+    if (this.meanMs > this.budgetMs && this.meanMs > this.refreshMs + PINNED_SLACK_MS) return "slow";
     this.settled = true;
     return "ok";
   }
@@ -111,6 +122,7 @@ export class FrameBudget {
   reset(): void {
     this.seen = this.count = this.sum = 0;
     this.settled = false;
+    this.refreshMs = Infinity;
   }
 }
 
