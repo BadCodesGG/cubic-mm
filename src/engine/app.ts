@@ -1,17 +1,23 @@
 /**
- * Wires the experience together: renderer, dataset, scene, camera, post, a round-0 fake spike
- * schedule, and the animation loop. `startApp` resolves once the first frame is ready to draw.
+ * Wires the experience together: renderer, dataset, scene, camera, post, the spiking
+ * simulation, and the animation loop. `startApp` resolves once the first frame is ready to draw.
  *
- * `?shot=hero` runs a fixed-timestep clock and the scripted hero camera, and holds the
- * simulation at a fixed time so screenshots are reproducible.
+ * `?shot=hero` runs a fixed-timestep clock and the scripted hero camera, stimulates the hero
+ * neuron at t = 0.3 s, and holds the simulation at a fixed time so screenshots are reproducible.
+ * `?parity=1` is the same clock run for 5 simulated seconds, for `scripts/parity.mjs`.
+ * `?sim=cpu` runs the simulation in the CPU worker even on WebGPU.
  */
 
 import { PerspectiveCamera, Scene, Vector3 } from "three/webgpu";
 import { NO_PARENT, PATH_DIST_UNIT_UM, dequantise } from "./format";
 import { loadDataset, type Dataset } from "./data";
-import { rng, synthDataset } from "./synth";
+import { synthDataset } from "./synth";
 import { createRenderer } from "./scene/renderer";
-import { createNeurons, SPIKE_SLOTS, type Neurons } from "./scene/neurons";
+import { createNeurons, type Neurons } from "./scene/neurons";
+// --- sim (r1/sim): the spiking simulation and its event bus ---
+import { EventBus } from "./events";
+import { createSimulation, type Simulation } from "./sim";
+// --- end sim ---
 import { createLayers } from "./scene/layers";
 import { createPost } from "./scene/post";
 import { createSceneUniforms } from "./scene/uniforms";
@@ -45,70 +51,29 @@ export interface CmmDebug {
   settled: boolean;
   dataset: "real" | "synth";
   hero: { neuron: number; distanceUm: number; screen: [number, number] };
+  // --- sim (r1/sim) ---
+  sim?: {
+    mode: "gpu" | "cpu";
+    syntheticSynapses: boolean;
+    synapses: number;
+    spikes: number;
+    /** Spikes caused by a stimulus (the scripted hero, or the visitor). */
+    stimulated: number;
+    rateHz: number;
+    spikeCounts(): Uint32Array;
+    /** Post neurons reached by the stimulated neuron's pulses so far. */
+    firstHop(): number[];
+    /** Resolves once every queued GPU readback or worker reply has been reported. */
+    settle(): Promise<void>;
+    /** `?parity=1` only: per-frame cost of the simulation at a given size (see sim/bench.ts). */
+    bench?(neurons: number, synapses: number): Promise<import("./sim/bench").BenchResult>;
+  };
+  // --- end sim ---
 }
 
 declare global {
   interface Window {
     __cmm?: CmmDebug;
-  }
-}
-
-const HERO_INTERVAL = 2;
-const RANDOM_MEAN_INTERVAL = 20;
-
-/** Round-0 stand-in for the simulation: Poisson spikes everywhere, plus a metronome neuron. */
-class SpikeSchedule {
-  private readonly next: Float64Array;
-  private readonly slot: Uint8Array;
-  private readonly r: () => number;
-  heroNext: number;
-  count = 0;
-  dirty = true;
-
-  constructor(
-    private readonly times: Float32Array,
-    neuronCount: number,
-    seed: number,
-    firstHeroSpike: number,
-  ) {
-    this.r = rng(seed);
-    this.next = new Float64Array(neuronCount);
-    this.slot = new Uint8Array(neuronCount);
-    this.heroNext = firstHeroSpike;
-    // Start from 20 s of history so the volume already has afterglow in it at t = 0.
-    for (let n = 0; n < neuronCount; n++) {
-      let t = -RANDOM_MEAN_INTERVAL + this.interval();
-      while (t < 0) {
-        this.emit(n, t);
-        t += this.interval();
-      }
-      this.next[n] = t;
-    }
-    this.count = 0;
-  }
-
-  private interval(): number {
-    return -Math.log(1 - this.r()) * RANDOM_MEAN_INTERVAL;
-  }
-
-  private emit(n: number, t: number): void {
-    this.times[n * SPIKE_SLOTS + this.slot[n]] = t;
-    this.slot[n] = (this.slot[n] + 1) % SPIKE_SLOTS;
-    this.count++;
-    this.dirty = true;
-  }
-
-  advance(t: number, hero: () => number): void {
-    while (t >= this.heroNext) {
-      this.emit(hero(), this.heroNext);
-      this.heroNext += HERO_INTERVAL;
-    }
-    for (let n = 0; n < this.next.length; n++) {
-      while (t >= this.next[n]) {
-        this.emit(n, this.next[n]);
-        this.next[n] += this.interval();
-      }
-    }
   }
 }
 
@@ -180,22 +145,6 @@ function pickHero(data: Dataset): { neuron: number; anchor: HeroAnchor } {
   return { neuron: best, anchor: { soma, axis } };
 }
 
-function nearestSoma(somaPos: Float32Array, p: Vector3): number {
-  let best = 0;
-  let bestD = Infinity;
-  for (let n = 0; n < somaPos.length / 3; n++) {
-    const dx = somaPos[n * 3] - p.x;
-    const dy = somaPos[n * 3 + 1] - p.y;
-    const dz = somaPos[n * 3 + 2] - p.z;
-    const d = dx * dx + dy * dy + dz * dz;
-    if (d < bestD) {
-      bestD = d;
-      best = n;
-    }
-  }
-  return best;
-}
-
 export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {}): Promise<App> {
   const progress = opts.onProgress ?? (() => {});
   const shot = opts.shot === "hero";
@@ -229,8 +178,30 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   progress(0.9, "Building the volume");
   const u = createSceneUniforms();
   const scene = new Scene();
-  const neurons: Neurons = createNeurons(data, u, isWebGPU ? 3 : 2);
-  scene.add(neurons.ribbons, neurons.somas);
+
+  // --- sim (r1/sim): create the bus and the simulation before the neurons, which read its spikes ---
+  const params = new URLSearchParams(window.location.search);
+  const parity = params.get("parity") === "1";
+  const bus = new EventBus();
+  const sim: Simulation = createSimulation({
+    renderer,
+    isWebGPU,
+    dataset: data,
+    bus,
+    seed: 11,
+    forceCpu: params.get("sim") === "cpu",
+  });
+  u.velocity.value = sim.params.conductionMps;
+  u.slowMo.value = sim.params.slowMo;
+  u.synDelay.value = sim.params.synDelayMs / 1000;
+  bus.on("stimulate", ({ neuron }) => sim.stimulate(neuron));
+  const neurons: Neurons = createNeurons(data, u, isWebGPU ? 3 : 2, {
+    spikes: sim.spikeTimesSource,
+    synapses: sim.synapses,
+  });
+  scene.add(neurons.ribbons, neurons.somas, neurons.pulses);
+  if (neurons.synapseGlow) scene.add(neurons.synapseGlow);
+  // --- end sim ---
   const layers = createLayers(data, u);
   scene.add(layers.group);
 
@@ -247,13 +218,12 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
 
   const post = createPost(renderer, scene, camera);
 
-  const holdAt = opts.holdAt ?? 1.3;
-  const schedule = new SpikeSchedule(neurons.textures.spikeTimes, data.neurons.count, 11, shot ? 1.0 : 0.6);
-  let heroNeuron = hero.neuron;
-  const pickHeroNeuron = () => {
-    if (!shot) heroNeuron = nearestSoma(neurons.somaPos, camera.position);
-    return heroNeuron;
-  };
+  // --- sim (r1/sim) ---
+  const scripted = shot || parity;
+  const holdAt = parity ? 5 : (opts.holdAt ?? 1.3);
+  /** Scripted runs stimulate the hero neuron once, at this simulation time. */
+  const HERO_STIMULUS_AT = 0.3;
+  // --- end sim ---
 
   const debug: CmmDebug = {
     isWebGPU,
@@ -265,6 +235,22 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     settled: false,
     dataset: source,
     hero: { neuron: hero.neuron, distanceUm: 0, screen: [0, 0] },
+    // --- sim (r1/sim) ---
+    sim: {
+      mode: sim.mode,
+      syntheticSynapses: sim.syntheticSynapses,
+      synapses: sim.synapses.count,
+      spikes: 0,
+      stimulated: 0,
+      rateHz: 0,
+      spikeCounts: () => sim.spikeCounts(),
+      firstHop: () => sim.firstHop(),
+      settle: () => sim.settle(),
+      bench: parity
+        ? async (n, s) => (await import("./sim/bench")).benchSimulation(sim.mode === "gpu" ? renderer : null, n, s)
+        : undefined,
+    },
+    // --- end sim ---
   };
   window.__cmm = debug;
 
@@ -299,7 +285,8 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     }
     last = now;
 
-    if (shot) {
+    const prevSimTime = simTime;
+    if (scripted) {
       simTime = Math.min(debug.frame / 60, holdAt);
       debug.settled = simTime >= holdAt;
       heroPath(simTime, hero.anchor, pose);
@@ -310,17 +297,20 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       controls?.update(dt);
     }
 
-    schedule.advance(simTime, pickHeroNeuron);
-    if (schedule.dirty) {
-      neurons.textures.spikes.needsUpdate = true;
-      schedule.dirty = false;
-    }
+    // --- sim (r1/sim) ---
+    if (scripted && prevSimTime < HERO_STIMULUS_AT && simTime >= HERO_STIMULUS_AT) sim.stimulate(hero.neuron);
+    sim.step(simTime, simTime - prevSimTime);
+    neurons.update();
+    debug.sim!.spikes = sim.stats.spikes;
+    debug.sim!.rateHz = sim.stats.rateHz;
+    debug.sim!.stimulated = sim.stats.stimulated;
+    // --- end sim ---
     u.time.value = simTime;
     debug.hero.distanceUm = camera.position.distanceTo(hero.anchor.soma);
     const ndc = hero.anchor.soma.clone().project(camera);
     debug.hero.screen = [((ndc.x + 1) / 2) * canvas.clientWidth, ((1 - ndc.y) / 2) * canvas.clientHeight];
     debug.simTime = simTime;
-    debug.spikes = schedule.count;
+    debug.spikes = sim.stats.spikes;
 
     post.render();
     debug.frame++;
@@ -339,6 +329,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       controls?.dispose();
       post.dispose();
       neurons.dispose();
+      // --- sim (r1/sim) ---
+      sim.dispose();
+      bus.clear();
+      // --- end sim ---
       layers.dispose();
       renderer.dispose();
       if (window.__cmm === debug) delete window.__cmm;
