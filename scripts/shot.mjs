@@ -4,6 +4,7 @@
  *   npm run build && node scripts/shot.mjs [--synth] [--t=1.45] [--webgl] [--name=hero] [--port=3117] [--sim=cpu]
  *     [--quality=hi|lite|auto] [--pieces=1|2|3] [--mobile] [--live] [--frames=10] [--uncapped] [--gpu-timing] [--budgetMs=20]
  *
+ * --select starts with the hero selected; --stimulate=N (with --live) selects and stimulates neuron N, then waits --after=S s (default 4), or with --until-hop1=N until N cells have fired.
  * --quality / --pieces pin the render tier (default: the scripted shot's own, hi/2 on WebGPU).
  * --budgetMs lowers the adaptive frame budget (with --live), to watch the tier step down.
  * --mobile emulates a 390x844 phone (DPR 3, touch, coarse pointer, a phone user agent) and also
@@ -46,6 +47,8 @@ for (const k of ["quality", "pieces", "budgetMs"]) {
   if (v) query.set(k, v);
 }
 if (flag("synth")) query.set("synth", "1");
+// --select: the hero starts selected, so the shot shows the cell panel (and the cascade panel under it).
+if (flag("select")) query.set("select", "hero");
 if (wantWebGL) query.set("webgl", "1");
 const simMode = value("sim", null);
 if (simMode) query.set("sim", simMode);
@@ -138,7 +141,23 @@ async function attempt(strategy) {
     await page.waitForFunction((f) => window.__cmm.frame > f, (await page.evaluate(() => window.__cmm.frame)) + extra, {
       timeout: 120_000,
     });
+    // --stimulate=N (with --live, whose clock keeps running): select and stimulate neuron N, then wait
+    // --after=S seconds (default 4) so its cascade has spread before the frame is taken.
+    const stimulateNeuron = value("stimulate", null);
+    if (stimulateNeuron !== null) {
+      await page.evaluate((n) => window.__cmm.stimulate(n), Number(stimulateNeuron));
+      const untilHop1 = Number(value("until-hop1", 0));
+      if (untilHop1 > 0) {
+        // Take the frame as soon as N cells have fired, while their lines are still fresh.
+        await page
+          .waitForFunction((n) => window.__cmm.cascade().hop1 >= n, untilHop1, { timeout: Number(value("after", 8)) * 1000, polling: 50 })
+          .catch(() => console.log(`  fewer than ${untilHop1} cells fired within --after`));
+      } else {
+        await page.waitForTimeout(Number(value("after", 4)) * 1000);
+      }
+    }
     const info = await page.evaluate(() => ({ ...window.__cmm }));
+    info.cascade = await page.evaluate(() => window.__cmm.cascade?.() ?? null);
     if (mobile) info.layout = await page.evaluate(layoutReport);
     if (!wantWebGL && !info.isWebGPU) return { ok: false, info, errors, threeWarnings, reason: "fell back to WebGL2" };
     const out = await nextShotPath();
@@ -177,6 +196,7 @@ try {
       (info.sim ? `sim ${info.sim.mode}${info.sim.syntheticSynapses ? " (synthetic synapses)" : ""} on ${info.sim.synapses} synapses, ` : "") +
       `hero neuron ${info.hero.neuron} at ${info.hero.distanceUm.toFixed(0)} µm, on screen at ${info.hero.screen.map((v) => v.toFixed(0)).join(",")}`,
   );
+  if (info.cascade) console.log(`  cascade ${JSON.stringify(info.cascade)}`);
   if (info.quality) {
     const q = info.quality;
     console.log(`  quality ${q.tier}/${q.pieces} (${q.instances} instances${q.adapted ? ", adapted down" : ""}), sim ${info.sim?.rateHz.toFixed(2)} Hz/neuron`);
