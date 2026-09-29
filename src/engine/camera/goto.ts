@@ -53,9 +53,11 @@ export class Flight {
   start(pose: Pose, seconds?: number, onDone?: () => void): void {
     this.from.position.copy(this.camera.position);
     this.camera.getWorldDirection(this.dir);
-    this.from.target.copy(this.camera.position).addScaledVector(this.dir, 50);
     this.to.position.copy(pose.position);
     this.to.target.copy(pose.target);
+    // Start the look point as deep as the destination's, so the gaze turns evenly rather than
+    // swinging while a near point is lerped toward a far one.
+    this.from.target.copy(this.camera.position).addScaledVector(this.dir, Math.max(50, this.camera.position.distanceTo(pose.target)));
     const distance = this.from.position.distanceTo(this.to.position);
     this.duration = seconds ?? Math.min(4, 1.2 + distance / 300);
     this.elapsed = 0;

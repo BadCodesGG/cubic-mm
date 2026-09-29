@@ -40,6 +40,21 @@ describe("Flight", () => {
     expect(flight.update(0.1)).toBe(false);
   });
 
+  it("keeps looking at a far target it already faces, instead of swinging the view on the way", () => {
+    const camera = new PerspectiveCamera();
+    camera.position.set(0, 0, 0);
+    camera.lookAt(0, 0, -300);
+    const target = new Vector3(0, 0, -300);
+    const flight = new Flight(camera, null);
+    flight.start({ position: new Vector3(120, 0, 0), target }, 1);
+    for (let i = 0; i < 2; i++) {
+      flight.update(0.25);
+      const forward = camera.getWorldDirection(new Vector3());
+      const toTarget = target.clone().sub(camera.position).normalize();
+      expect(forward.dot(toTarget)).toBeGreaterThan(0.9999);
+    }
+  });
+
   it("scales the duration with distance when none is given, capped at 4 s", () => {
     const camera = new PerspectiveCamera();
     const near = new Flight(camera, null);
