@@ -1,7 +1,7 @@
 /**
  * Takes a reproducible screenshot of the hero shot from the production build.
  *
- *   npm run build && node scripts/shot.mjs [--synth] [--t=1.45] [--webgl] [--name=hero]
+ *   npm run build && node scripts/shot.mjs [--synth] [--t=1.45] [--webgl] [--name=hero] [--port=3117] [--sim=cpu]
  *
  * Starts `next start` on port 3117, opens `/?shot=hero` in Playwright Chromium at 1600x900,
  * DPR 1, waits for the frame counter and the shot clock to settle, asserts WebGPU (unless
@@ -15,10 +15,6 @@ import path from "node:path";
 import { chromium } from "playwright";
 import { ROOT, startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
-const PORT = 3117;
-const BASE = `http://localhost:${PORT}`;
-const SHOTS = path.join(ROOT, ".claude", "shots");
-
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(`--${name}`);
 const value = (name, fallback) => {
@@ -26,11 +22,18 @@ const value = (name, fallback) => {
   return hit ? hit.slice(name.length + 3) : fallback;
 };
 
+// --port lets parallel worktrees each take their own.
+const PORT = Number(value("port", 3117));
+const BASE = `http://localhost:${PORT}`;
+const SHOTS = path.join(ROOT, ".claude", "shots");
+
 const wantWebGL = flag("webgl");
 const name = value("name", "hero");
 const query = new URLSearchParams({ shot: "hero" });
 if (flag("synth")) query.set("synth", "1");
 if (wantWebGL) query.set("webgl", "1");
+const simMode = value("sim", null);
+if (simMode) query.set("sim", simMode);
 const t = value("t", null);
 if (t) query.set("t", t);
 const url = `${BASE}/?${query}`;
@@ -110,6 +113,7 @@ try {
   console.log(
     `  ${info.dataset} data, ${info.isWebGPU ? "WebGPU" : "WebGL2"}, ${info.instances} ribbon instances, ` +
       `frame ${info.frame}, ${info.frameMs.toFixed(2)} ms/frame, ${info.spikes} spikes, t=${info.simTime.toFixed(2)}s, ` +
+      (info.sim ? `sim ${info.sim.mode}${info.sim.syntheticSynapses ? " (synthetic synapses)" : ""} on ${info.sim.synapses} synapses, ` : "") +
       `hero neuron ${info.hero.neuron} at ${info.hero.distanceUm.toFixed(0)} µm, on screen at ${info.hero.screen.map((v) => v.toFixed(0)).join(",")}`,
   );
   console.log(`  saved ${path.relative(ROOT, result.out)}`);
