@@ -15,6 +15,10 @@ import { createNeurons, SPIKE_SLOTS, type Neurons } from "./scene/neurons";
 import { createLayers } from "./scene/layers";
 import { createPost } from "./scene/post";
 import { createSceneUniforms } from "./scene/uniforms";
+// r1-audio: imports
+import { EventBus } from "./events";
+import { createAudio, type AudioEngine } from "./audio/engine";
+import { publishAudio, unpublishAudio } from "./audio/handle";
 import { FlyControls, heroPath, WORLD_UP, type CameraPose, type HeroAnchor } from "./camera/fly";
 
 export interface AppOptions {
@@ -64,6 +68,8 @@ class SpikeSchedule {
   heroNext: number;
   count = 0;
   dirty = true;
+  /** r1-audio: round-0 stand-in for the simulation's `spike` event. Remove once the sim emits it. */
+  onSpike?: (neuron: number, time: number) => void;
 
   constructor(
     private readonly times: Float32Array,
@@ -96,6 +102,7 @@ class SpikeSchedule {
     this.slot[n] = (this.slot[n] + 1) % SPIKE_SLOTS;
     this.count++;
     this.dirty = true;
+    this.onSpike?.(n, t); // r1-audio: round-0 stand-in, see onSpike
   }
 
   advance(t: number, hero: () => number): void {
@@ -249,6 +256,11 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
 
   const holdAt = opts.holdAt ?? 1.3;
   const schedule = new SpikeSchedule(neurons.textures.spikeTimes, data.neurons.count, 11, shot ? 1.0 : 0.6);
+  // r1-audio: bus + audio. Other branches also create the bus; keep one `new EventBus()` when merging.
+  const bus = new EventBus();
+  const audio: AudioEngine = createAudio({ bus, dataset: data, getCamera: () => camera });
+  publishAudio(audio);
+  schedule.onSpike = (neuron, time) => bus.emit("spike", { neuron, time, stimulated: false }); // round-0 stand-in
   let heroNeuron = hero.neuron;
   const pickHeroNeuron = () => {
     if (!shot) heroNeuron = nearestSoma(neurons.somaPos, camera.position);
@@ -311,6 +323,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     }
 
     schedule.advance(simTime, pickHeroNeuron);
+    audio.update(dt); // r1-audio
     if (schedule.dirty) {
       neurons.textures.spikes.needsUpdate = true;
       schedule.dirty = false;
@@ -337,6 +350,8 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       void renderer.setAnimationLoop(null);
       observer.disconnect();
       controls?.dispose();
+      unpublishAudio(audio); // r1-audio
+      audio.dispose(); // r1-audio
       post.dispose();
       neurons.dispose();
       layers.dispose();
