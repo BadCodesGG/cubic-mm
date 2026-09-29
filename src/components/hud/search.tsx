@@ -18,13 +18,11 @@ export function Search({ app }: { app: App }) {
   const [query, setQuery] = useState("");
   const [focused, setFocused] = useState(false);
   const [active, setActive] = useState(0);
-  // Bumped on focus, so the distances are measured from wherever the camera is now.
-  const [stamp, setStamp] = useState(0);
+  // Sampled when the box gains focus, so distances are measured from wherever the camera is now.
+  const [origin, setOrigin] = useState<[number, number, number]>(() => [...app.cameraPosition()] as [number, number, number]);
   const input = useRef<HTMLInputElement>(null);
   const listId = useId();
 
-  // The camera position is sampled when the box gains focus (`stamp`), not on every keystroke.
-  const origin = useMemo(() => [...app.cameraPosition()] as [number, number, number], [app, stamp]);
   const result = useMemo(() => search(app.data, query, origin), [app, query, origin]);
   // A chip for a kind of cell this dataset does not hold would do nothing, so it is disabled.
   const chips = useMemo(() => QUICK_QUERIES.map((q) => ({ q, found: search(app.data, q, [0, 0, 0], { limit: 1 }).total > 0 })), [app]);
@@ -105,7 +103,7 @@ export function Search({ app }: { app: App }) {
           }}
           onFocus={() => {
             setFocused(true);
-            setStamp((s) => s + 1);
+            setOrigin([...app.cameraPosition()] as [number, number, number]);
           }}
           onBlur={() => setFocused(false)}
           onKeyDown={onKeyDown}
