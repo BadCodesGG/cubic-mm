@@ -108,7 +108,8 @@ export default function Experience() {
         startApp(canvas, {
           shot: params.get("shot"),
           synth: params.get("synth") === "1",
-          forceWebGL: params.get("webgl") === "1" || prefs.quality === "lite",
+          forceWebGL: params.get("webgl") === "1",
+          quality: prefs.quality,
           holdAt: Number.isFinite(hold) && hold > 0 ? hold : undefined,
           select: params.get("select"),
           onProgress: (fraction, label) => {

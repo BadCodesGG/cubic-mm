@@ -82,6 +82,8 @@ const PATH_SAMPLES = 128;
 const TEX_WIDTH = 1024;
 /** Longest piece a skeleton edge is drawn with, µm. */
 const PIECE_UM = 3;
+/** Typical soma radius, µm, for sizing its glow on screen. */
+const SOMA_GLOW_UM = 3.5;
 
 type FloatNode = Node<"float">;
 
@@ -148,10 +150,15 @@ function spikeSlots(tex: NeuronTextures, source: SpikeTimesSource | undefined): 
   return (neuron) => [textureLoad(tex.spikes, texel(neuron, 2, 0)), textureLoad(tex.spikes, texel(neuron, 2, 1))];
 }
 
-/** Spike light falls off with view depth on top of the haze, so near activity is what reads. */
-function spikeNear(u: SceneUniforms, depth: FloatNode) {
+/**
+ * Spike light falls off with view depth on top of the haze, so near activity is what reads. The
+ * stimulated neuron falls off more gently, so its cascade stays bright across the frame.
+ */
+function spikeNear(u: SceneUniforms, depth: FloatNode, neuron: FloatNode) {
   const x = depth.div(u.spikeNearUm);
-  return float(1).div(x.mul(x).add(1));
+  const x2 = x.mul(x);
+  const y = depth.div(u.cascadeNearUm);
+  return select(neuron.equal(u.stimNeuron), float(1).div(y.mul(y).add(1)), float(1).div(x2.mul(x2).add(1)));
 }
 
 /** Sum of the spike pulse and its afterglow over one neuron's 8 slots, at path distance `path` µm. */
@@ -452,54 +459,71 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots
   material.vertexNode = cameraProjectionMatrix.mul(vec4(posView, 1));
 
   const neuron = aC.z;
-  const vAcross = varying(across);
-  const vPath = varying(mix(aC.x, aC.y, along));
-  const vCoverage = varying(min(radiusPx.div(drawnPx), 1));
-  const vDepth = varying(depth);
-  const vCompartment = varying(aC.w);
-  const vInfo = varying(textureLoad(tex.info, texel(neuron, 1, 0)));
-  const [spikeA, spikeB] = slots(neuron);
-  const vSpikeA = varying(spikeA);
-  const vSpikeB = varying(spikeB);
+  const info = textureLoad(tex.info, texel(neuron, 1, 0));
+  const compartment = aC.w;
+  const isAxon = step(0.5, compartment).mul(step(compartment, 1.5));
+  const path = mix(aC.x, aC.y, along);
 
-  const vRadiusPx = varying(radiusPx);
-  const isAxon = step(0.5, vCompartment).mul(step(vCompartment, 1.5));
+  // Everything that is constant or smooth along one piece is worked out per vertex and
+  // interpolated; the fragment stage only shapes the cross-section and the travelling pulse.
+  const h = haze(u, depth);
+  const coverage = min(radiusPx.div(drawnPx), 1);
+  // Far structure drifts toward the haze tint, near structure keeps its own hue.
+  const tint = mix(u.hazeTint, info.rgb, h.pow(0.35));
+  const vBase = varying(tint.mul(info.a).mul(mix(float(1), u.axonGain, isAxon)).mul(u.exposure));
+  const vAlpha = varying(
+    u.opacity.mul(coverage).mul(h).mul(mix(float(1), u.axonAlpha, isAxon)).mul(sqrt(info.a)),
+  );
+  // Back-propagating spikes reach into the dendrites weakly and die out with distance.
+  const glowGain = mix(exp(path.negate().div(90)).mul(0.35), float(1), isAxon);
+  const vGlow = varying(glowGain.mul(spikeNear(u, depth, neuron)).mul(sqrt(coverage)).mul(h));
+  const vDrawnPx = varying(drawnPx);
+  const vDepth = varying(depth);
+  const delay = path.mul(u.slowMo).mul(1e-6).div(u.velocity);
+  const vDelay = varying(delay);
+  // Of the neuron's 8 spike slots, only the latest one whose front has reached (or is about to
+  // reach) this piece lights it: an earlier spike's pulse has passed and its tail is faint by then.
+  // Picked once per vertex, so each fragment evaluates one pulse instead of eight.
+  const midDelay = mix(aC.x, aC.y, 0.5).mul(u.slowMo).mul(1e-6).div(u.velocity);
+  const [slotA, slotB] = slots(neuron);
+  const horizon = u.time.sub(midDelay).add(u.pulseWidth.mul(3));
+  let latest: FloatNode = float(NEVER);
+  for (const t of [slotA.x, slotA.y, slotA.z, slotA.w, slotB.x, slotB.y, slotB.z, slotB.w]) {
+    latest = select(t.lessThanEqual(horizon).and(t.greaterThan(latest)), t, latest);
+  }
+  const vSpike = varying(latest);
+  const vAcross = varying(across);
+  const vThick = varying(smoothstep(2.5, 14, radiusPx));
 
   // Thin ribbons (a few px) get a soft bright core. Thick ones, which only happen close to the
   // camera, read as translucent tubes instead: a dim body with brighter membrane edges.
   const x2 = vAcross.mul(vAcross);
   const facing = sqrt(max(float(1).sub(x2), 0));
   const core = pow(facing, 3.2);
-  const membrane = float(0.16).add(pow(float(1).sub(facing), 2).mul(0.9)).mul(smoothstep(1, 0.82, abs(vAcross)));
-  const thick = smoothstep(2.5, 14, vRadiusPx);
-  const profile = mix(core, membrane.mul(0.7), thick);
+  const rim = float(1).sub(facing);
+  const membrane = float(0.16).add(rim.mul(rim).mul(0.9)).mul(smoothstep(1, 0.82, abs(vAcross)));
+  const profile = mix(core, membrane.mul(0.7), vThick);
 
-  const h = haze(u, vDepth);
-  // Anything within a few tens of µm of the lens falls away, as if out of the focal plane.
+  const dt = u.time.sub(vSpike.add(vDelay));
+  const x = dt.div(u.pulseWidth);
+  const pulse = exp(x.mul(x).negate());
+  const after = step(0, dt).mul(exp(dt.negate().div(u.afterglow)));
+  const base = vBase;
+  // Anything within a few tens of µm of the lens falls away, as if out of the focal plane. Kept
+  // per fragment: it changes steeply along the long pieces that pass right by the camera.
   const nearFade = smoothstep(4, 45, vDepth);
-  // Far structure drifts toward the haze tint, near structure keeps its own hue.
-  const tint = mix(u.hazeTint, vInfo.rgb, h.pow(0.35));
-  const compGain = mix(float(1), u.axonGain, isAxon);
-  const base = tint.mul(vInfo.a).mul(compGain).mul(u.exposure);
-
-  const { pulse, after } = spikeGlow(u, vSpikeA, vSpikeB, vPath);
-  // Back-propagating spikes reach into the dendrites weakly and die out with distance.
-  const glowGain = mix(exp(vPath.negate().div(90)).mul(0.35), float(1), isAxon);
-  const glow = u.spikeColor
-    .mul(pulse.mul(u.spikeGain).add(after.mul(u.afterglowGain)))
-    .mul(glowGain)
-    .mul(spikeNear(u, vDepth));
-  const fade = h.mul(nearFade);
   // Premultiplied "over" blending: each ribbon partly hides what is behind it, so dense tangles
   // settle toward the ribbons' own colour instead of summing to white. The spike glow rides on
   // top as pure emission (colour beyond alpha), which is what bloom picks up.
-  const alpha = u.opacity
-    .mul(vCoverage)
-    .mul(profile)
-    .mul(fade)
-    .mul(mix(float(1), u.axonAlpha, isAxon))
-    .mul(sqrt(vInfo.a));
-  const emission = glow.mul(sqrt(vCoverage)).mul(core).mul(fade);
+  const alpha = vAlpha.mul(profile).mul(nearFade);
+  // The glowing core is the thin ribbon's own core, but never wider than glowCapPx: a thick ribbon
+  // up close carries its pulse as a bright line inside the tube.
+  const t = vAcross.mul(max(float(1), vDrawnPx.div(u.glowCapPx)));
+  const glowCore = pow(sqrt(max(float(1).sub(t.mul(t)), 0)), 3.2);
+  const emission = u.spikeColor
+    .mul(pulse.mul(u.spikeGain).add(after.mul(u.afterglowGain)))
+    .mul(vGlow.mul(nearFade))
+    .mul(glowCore);
 
   material.colorNode = vec4(base.mul(alpha).add(emission), alpha);
   material.transparent = true;
@@ -529,10 +553,15 @@ function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots):
     .mul(pow(facing, 3).mul(0.5).add(pow(float(1).sub(facing), 3).mul(0.12)))
     .mul(u.somaGain);
   const { pulse, after } = spikeGlow(u, spikeA, spikeB, float(0), u.somaAfterglow);
+  // A soma is 2.5 to 4.5 µm across; once it is larger than glowCapPx on screen its flash keeps a
+  // constant total light instead of growing with its area.
+  const radiusPx = u.pixelScale.mul(SOMA_GLOW_UM).div(max(depth, 0.5));
+  const cap = min(float(1), u.glowCapPx.div(radiusPx)).pow(2);
   const glow = u.spikeColor
     .mul(pulse.mul(u.spikeGain).add(after.mul(u.somaAfterglowGain)))
     .mul(float(0.3).add(facing.mul(0.7)))
-    .mul(spikeNear(u, depth));
+    .mul(spikeNear(u, depth, neuron))
+    .mul(cap);
 
   const material = new MeshBasicNodeMaterial();
   material.colorNode = vec4(body.add(glow).mul(haze(u, depth)).mul(smoothstep(8, 60, depth)), 1);
@@ -606,6 +635,7 @@ function pickSlot([a, b]: SlotPair, slot: Node<"uint">): FloatNode {
 function spriteMesh(
   u: SceneUniforms,
   geometry: InstancedBufferGeometry,
+  neuron: FloatNode,
   centre: Node<"vec3">,
   intensity: FloatNode,
   radiusUm: FloatNode,
@@ -614,8 +644,9 @@ function spriteMesh(
   const centreView = modelViewMatrix.mul(vec4(centre, 1)).xyz;
   const depth = max(centreView.z.negate(), 0.5);
   const pxPerUm = u.pixelScale.div(depth);
-  const radius = max(radiusUm, float(2.5).div(pxPerUm));
-  const light = intensity.mul(spikeNear(u, depth)).mul(haze(u, depth)).mul(smoothstep(4, 45, depth));
+  // At least 2.5 px so a far point still reads, at most glowCapPx so a near one is not a blob.
+  const radius = min(max(radiusUm, float(2.5).div(pxPerUm)), u.glowCapPx.div(pxPerUm));
+  const light = intensity.mul(spikeNear(u, depth, neuron)).mul(haze(u, depth)).mul(smoothstep(4, 45, depth));
   const size = select(light.greaterThan(0.002), radius, float(0));
   const corner = positionLocal.xy;
 
@@ -654,7 +685,7 @@ function pulseSprites(u: SceneUniforms, slots: SpikeSlots, pathTex: DataTexture,
     .mul(smoothstep(0, 12, d))
     .mul(float(1).sub(smoothstep(len.sub(25), len, d)));
   const color = mix(u.spikeColor, vec3(1, 0.95, 0.85), 0.5);
-  return spriteMesh(u, quadGeometry(neuronCount * SPIKE_SLOTS), p, alive.mul(u.pulseSpriteGain), u.pulseSpriteUm, color);
+  return spriteMesh(u, quadGeometry(neuronCount * SPIKE_SLOTS), neuron, p, alive.mul(u.pulseSpriteGain), u.pulseSpriteUm, color);
 }
 
 /** One sprite per synapse, lit briefly each time a pulse from its presynaptic cell lands there. */
@@ -687,5 +718,5 @@ function synapseSprites(
     glow = glow.add(smoothstep(-0.02, 0, dt).mul(exp(max(dt, 0).negate().div(u.synapseGlowDecay))));
   }
   const color = mix(u.spikeColor, vec3(1, 0.92, 0.8), 0.35);
-  return spriteMesh(u, geometry, aSyn.xyz, glow.mul(u.synapseGlowGain), u.synapseGlowUm, color);
+  return spriteMesh(u, geometry, aPre, aSyn.xyz, glow.mul(u.synapseGlowGain), u.synapseGlowUm, color);
 }

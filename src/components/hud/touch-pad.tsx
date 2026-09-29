@@ -57,6 +57,7 @@ function StickZone({ label, onChange }: { label: string; onChange: (s: Stick) =>
     <div
       ref={base}
       aria-hidden="true"
+      data-touch-stick
       className="pointer-events-auto relative grid size-[7.5rem] touch-none select-none place-items-center rounded-full border border-slate-400/25 bg-slate-900/30"
       onPointerDown={(e) => {
         if (active.current !== null) return;
