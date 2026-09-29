@@ -10,6 +10,8 @@
  * checks that the HUD panels do not overlap, the page has no horizontal overflow, the touch sticks
  * show, and the renderer's pixel ratio is at most 1.5. --live drops `shot=hero`, so the page runs
  * as a visitor sees it (free camera, adaptive quality) and is captured after 6 s.
+ * --tour opens `/?tour=1&t=<--t>`: the intro tour on its fixed clock, held at t tour seconds.
+ * Every other run marks the tour seen first, so it never covers the view being captured.
  *
  * Starts `next start` on port 3117, opens `/?shot=hero` in Playwright Chromium at 1600x900,
  * DPR 1, waits for the frame counter and the shot clock to settle, asserts WebGPU (unless
@@ -38,8 +40,10 @@ const SHOTS = path.join(ROOT, ".claude", "shots");
 const wantWebGL = flag("webgl");
 const mobile = flag("mobile");
 const live = flag("live");
+const tour = flag("tour");
 const name = value("name", mobile ? "mobile" : "hero");
-const query = new URLSearchParams(live ? {} : { shot: "hero" });
+const query = new URLSearchParams(live || tour ? {} : { shot: "hero" });
+if (tour) query.set("tour", "1");
 if (flag("gpu-timing")) query.set("gpuTiming", "1");
 for (const k of ["quality", "pieces", "budgetMs"]) {
   const v = value(k, null);
@@ -116,6 +120,7 @@ async function attempt(strategy) {
           }
         : { viewport: { width: 1600, height: 900 }, deviceScaleFactor: 1 },
     );
+    if (!tour) await context.addInitScript(() => localStorage.setItem("cmm-tour", "seen"));
     const page = await context.newPage();
     page.on("console", (msg) => {
       const text = msg.text();

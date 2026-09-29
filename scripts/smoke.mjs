@@ -71,6 +71,8 @@ async function launch(args) {
 
 async function openExperience(browser, query, viewport = { width: 1280, height: 720 }) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
+  // The intro tour plays on a first visit and swallows the input that skips it; these checks drive the free view.
+  await context.addInitScript(() => localStorage.setItem("cmm-tour", "seen"));
   const page = await context.newPage();
   const problems = watch(page);
   await page.goto(`${BASE}/?${query}`, { waitUntil: "load" });

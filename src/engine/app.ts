@@ -9,6 +9,8 @@
  * `?gpuTiming=1` reports the GPU time of each frame's render passes as `__cmm.gpuMs` (WebGPU only).
  * `?quality=hi|lite` and `?pieces=1|2|3` pin the render level (see quality.ts) and turn adapting off;
  * `?budgetMs=N` sets the frame budget adapting steps down against (default 20 ms).
+ * `?tour=1` plays the intro tour even when it has been seen; with `&t=N` it runs on a fixed clock
+ * and holds at N tour seconds, so a shot of any moment of the tour is reproducible.
  */
 
 import { PerspectiveCamera, Scene, Vector3 } from "three/webgpu";
@@ -36,6 +38,12 @@ import { AHEAD_UM, RideCamera } from "./camera/ride";
 import { createHudFrame, updateHudFrame, type HudFrame } from "./camera/view";
 import type { Stick } from "./camera/touch";
 // --- end r1/nav ---
+// --- r3/tour: intro tour, home and jump flights, time control, screenshots ---
+import { Flight, poseAround, type Pose } from "./camera/goto";
+import { markTourSeen, readTourSeen } from "./prefs";
+import { Tour, shouldRunTour } from "./tour";
+import { captureFrame, downloadBlob, shotFilename } from "./screenshot";
+// --- end r3/tour
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -52,7 +60,23 @@ export interface AppOptions {
   /** "hero" selects the hero neuron at start, so screenshots can show the selection panel. */
   select?: string | null;
   // --- end r1/nav ---
+  // --- r3/tour ---
+  /** `?tour=1`: play the intro tour even if seen (never in a scripted shot or parity run). */
+  tour?: boolean;
+  // --- end r3/tour
 }
+
+// --- r3/tour ---
+export interface TourHandle {
+  running(): boolean;
+  /** Seconds since the tour started. */
+  time(): number;
+  heroNeuron: number;
+  skip(): void;
+  /** Plays the tour again from the start ("Replay the intro"). */
+  replay(): void;
+}
+// --- end r3/tour
 
 export interface App {
   isWebGPU: boolean;
@@ -69,6 +93,13 @@ export interface App {
   /** Touch pad input: left stick moves, right stick looks. */
   setSticks(move: Stick, look: Stick): void;
   // --- end r1/nav ---
+  // --- r3/tour ---
+  tour: TourHandle;
+  /** Current simulation speed: 1 normal, 0.1 slow motion, 0 paused. */
+  timeScale(): number;
+  /** Called after each screenshot with its filename, or null if it could not be taken. */
+  onScreenshot(listener: (filename: string | null) => void): () => void;
+  // --- end r3/tour
 }
 
 export interface CmmDebug {
@@ -109,6 +140,12 @@ export interface CmmDebug {
   selected: number;
   ride: string;
   // --- end r1/nav ---
+  // --- r3/tour ---
+  /** Camera position (µm) and heading, `yaw = atan2(dir.x, dir.z)`, for the minimap. */
+  camera?: { x: number; y: number; z: number; yaw: number };
+  timeScale?: number;
+  tour?: { running: boolean; time: number };
+  // --- end r3/tour
 }
 
 declare global {
@@ -402,6 +439,112 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   let disposed = false;
   let timingPending = false;
   const gpuSamples: number[] = [];
+
+  // --- r3/tour: one shared flight for home, jump and the tour; the time scale; screenshots ---
+  const flight = new Flight(camera, controls);
+  const restPose: Pose = { position: new Vector3(), target: new Vector3() };
+  heroPath(0, hero.anchor, restPose);
+  let timeScale = 1;
+  bus.on("timeScale", ({ scale }) => {
+    if (Number.isFinite(scale) && scale >= 0) timeScale = scale;
+  });
+  bus.on("home", () => {
+    if (scripted) return;
+    ride.cancel();
+    flight.start(restPose);
+  });
+  const jumpPose: Pose = { position: new Vector3(), target: new Vector3() };
+  const jumpSoma = new Vector3();
+  const jumpAway = new Vector3();
+  bus.on("jump", ({ neuron }) => {
+    if (scripted || !(neuron >= 0 && neuron < data.neurons.count)) return;
+    ride.cancel();
+    jumpSoma.fromArray(somaPos, neuron * 3);
+    // Arrive from the side the camera is already on, level with the soma; poseAround adds the lift.
+    jumpAway.copy(camera.position).sub(jumpSoma).setY(0);
+    if (jumpAway.lengthSq() < 1e-6) jumpAway.copy(hero.anchor.axis).negate().setY(0);
+    jumpAway.normalize();
+    flight.start(poseAround(jumpSoma, jumpAway, 120, jumpPose), undefined, () => bus.emit("select", { neuron }));
+  });
+  // A ride takes the camera from a flight in progress.
+  bus.on("ride", () => flight.cancel());
+
+  const tour = new Tour({ flight, camera, bus, heroNeuron: hero.neuron, anchor: hero.anchor, onEnd: () => markTourSeen() });
+  const startTour = () => {
+    if (scripted) return;
+    ride.cancel();
+    bus.emit("select", { neuron: -1 });
+    bus.emit("timeScale", { scale: 1 });
+    tour.start();
+  };
+  /** `?tour=1&t=N`: the tour on a fixed 60 Hz clock, held at N seconds. */
+  const tourHoldAt = opts.tour && opts.holdAt !== undefined && !scripted ? opts.holdAt : null;
+  // Input that skips the tour does nothing else; buttons (Skip itself, the sound toggle) keep working.
+  const MODIFIERS = new Set(["ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft", "AltRight", "MetaLeft", "MetaRight"]);
+  let swallowClickUntil = 0;
+  const onTourInput = (e: Event) => {
+    if (e.type === "click") {
+      if (performance.now() < swallowClickUntil) e.stopPropagation();
+      return;
+    }
+    if (!tour.running || tourHoldAt !== null) return;
+    if (e.target instanceof Element && e.target.closest("button, a, [role='button']")) return;
+    if (e instanceof KeyboardEvent && (MODIFIERS.has(e.code) || e.ctrlKey || e.metaKey || e.altKey)) return;
+    e.stopPropagation();
+    if (e.type === "keydown") e.preventDefault();
+    if (e.type === "pointerdown") swallowClickUntil = performance.now() + 1000;
+    tour.skip();
+  };
+  const TOUR_INPUT = ["keydown", "pointerdown", "click", "wheel", "touchstart"] as const;
+  for (const type of TOUR_INPUT) {
+    window.addEventListener(type, onTourInput, { capture: true, passive: type === "wheel" || type === "touchstart" });
+  }
+
+  const onAppKey = (e: KeyboardEvent) => {
+    if (scripted || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable]")) return;
+    if (e.code === "KeyH") bus.emit("home", {});
+    else if (e.code === "KeyP") bus.emit("screenshot", {});
+    else if (e.code === "Comma") bus.emit("timeScale", { scale: 0.1 });
+    else if (e.code === "Period") bus.emit("timeScale", { scale: 1 });
+  };
+  window.addEventListener("keydown", onAppKey);
+
+  const shotListeners = new Set<(filename: string | null) => void>();
+  let shotPending = false;
+  bus.on("screenshot", () => {
+    shotPending = true;
+  });
+  /** Runs inside the animation loop, so the high-resolution render and `toBlob` share one task. */
+  const takeScreenshot = () => {
+    const filename = shotFilename(selected >= 0 ? data.neurons.rootId[selected].toString() : null);
+    const report = (blob: Blob | null) => {
+      if (blob) downloadBlob(blob, filename);
+      for (const listener of shotListeners) listener(blob ? filename : null);
+    };
+    try {
+      void captureFrame({
+        canvas,
+        getPixelRatio: () => renderer.getPixelRatio(),
+        setPixelRatio: (ratio) => renderer.setPixelRatio(ratio),
+        resize,
+        render: () => post.render(),
+      }).then(report, () => report(null));
+    } catch (err) {
+      console.warn("Could not take the screenshot:", err);
+      report(null);
+    }
+    // The capture frame is slow by design: keep it out of the frame budget and the next frame's dt.
+    last = -1;
+    budget?.reset();
+  };
+  const camDir = new Vector3();
+  const debugCamera = { x: 0, y: 0, z: 0, yaw: 0 };
+  debug.camera = debugCamera;
+  const debugTour = { running: false, time: 0 };
+  debug.tour = debugTour;
+  // --- end r3/tour
+
   const loop = () => {
     // React strict mode mounts twice in dev and disposes the first app as soon as it resolves; the
     // renderer's loop can still fire once after that, on a detached zero-size canvas.
@@ -430,9 +573,14 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       camera.position.copy(pose.position);
       camera.lookAt(pose.target);
     } else {
-      simTime += dt;
-      // --- r1/nav: the ride owns the camera while it runs, FlyControls otherwise ---
-      if (!ride.update(simTime, dt)) controls?.update(dt);
+      // --- r3/tour: the time scale slows the simulation only; the tour and flights keep real time ---
+      const step = tourHoldAt === null ? dt : tour.time < tourHoldAt - 1e-9 ? 1 / 60 : 0;
+      if (tourHoldAt !== null) debug.settled = step === 0;
+      simTime += step * timeScale;
+      tour.update(step);
+      // --- end r3/tour
+      // --- r1/nav: the ride owns the camera while it runs, then a flight (r3/tour), FlyControls otherwise ---
+      if (!ride.update(simTime, step) && !flight.update(step)) controls?.update(step);
       // --- end r1/nav ---
     }
 
@@ -467,6 +615,20 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     debug.selected = selected;
     debug.ride = ride.state;
     // --- end r1/nav ---
+    // --- r3/tour ---
+    camera.getWorldDirection(camDir);
+    debugCamera.x = camera.position.x;
+    debugCamera.y = camera.position.y;
+    debugCamera.z = camera.position.z;
+    debugCamera.yaw = Math.atan2(camDir.x, camDir.z);
+    debug.timeScale = scripted ? 1 : timeScale;
+    debugTour.running = tour.running;
+    debugTour.time = tour.time;
+    if (shotPending) {
+      shotPending = false;
+      takeScreenshot();
+    }
+    // --- end r3/tour
 
     post.render();
     debug.frame++;
@@ -483,6 +645,9 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   };
 
   progress(1, "Ready");
+  // --- r3/tour: the tour places the camera before the first frame is drawn ---
+  if (shouldRunTour({ seen: readTourSeen(), shot, parity, hash: window.location.hash, forced: opts.tour === true })) startTour();
+  // --- end r3/tour
   await renderer.setAnimationLoop(loop);
   // --- r1/nav ---
   if (opts.select === "hero") bus.emit("select", { neuron: hero.neuron });
@@ -498,12 +663,32 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     cancelRide: () => ride.cancel(),
     setSticks: (move, look) => controls?.setSticks(move, look),
     // --- end r1/nav ---
+    // --- r3/tour ---
+    tour: {
+      running: () => tour.running,
+      time: () => tour.time,
+      heroNeuron: hero.neuron,
+      skip: () => tour.skip(),
+      replay: startTour,
+    },
+    timeScale: () => (scripted ? 1 : timeScale),
+    onScreenshot(listener) {
+      shotListeners.add(listener);
+      return () => shotListeners.delete(listener);
+    },
+    // --- end r3/tour
     dispose() {
       // --- r1/nav ---
       ride.dispose();
       picker.dispose();
       // --- end r1/nav ---
       disposed = true;
+      // --- r3/tour ---
+      for (const type of TOUR_INPUT) window.removeEventListener(type, onTourInput, { capture: true });
+      window.removeEventListener("keydown", onAppKey);
+      flight.cancel();
+      shotListeners.clear();
+      // --- end r3/tour
       abort.abort();
       void renderer.setAnimationLoop(null);
       observer.disconnect();

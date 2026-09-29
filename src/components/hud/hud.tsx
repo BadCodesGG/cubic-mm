@@ -6,6 +6,13 @@ import { describeNeuron, formatCount } from "@/engine/info";
 import { FOCUS, NeuronPanel, SummaryPanel, type PanelView } from "./panels";
 import { TouchPad } from "./touch-pad";
 import { useCoarsePointer, useHudFrame, useMedia, useReducedMotion, useSelection, useStatus, type FrameSnap } from "./use-hud";
+// --- r3/tour ---
+import { useTourRunning } from "./use-hud";
+import { Minimap } from "./minimap";
+import { ScreenshotButton, ScreenshotToast } from "./screenshot";
+import { TimeControl, TimeStatus } from "./time";
+import { ReplayIntro, TourOverlay } from "./tour";
+// --- end r3/tour
 
 const SHADOW = { textShadow: "0 0 6px #04060b, 0 0 2px #04060b" } as const;
 
@@ -117,6 +124,7 @@ function About({ app, open, setOpen }: { app: App; open: boolean; setOpen: (open
             Every number in this view is measured from the {formatCount(app.data.neurons.count)} loaded skeletons
             ({app.data.lod === "hi" ? "full" : "simplified"} detail).
           </p>
+          <ReplayIntro app={app} onReplay={() => setOpen(false)} /> {/* r3/tour */}
         </div>
       ) : null}
     </>
@@ -211,6 +219,7 @@ export function Hud({ app }: { app: App }) {
   const coarse = useCoarsePointer();
   const narrow = useMedia(NARROW);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const touring = useTourRunning(app); // r3/tour
   // The selection the visitor expanded the panel for: picking another cell (or none) collapses it again.
   const [expandedFor, setExpandedFor] = useState<number | null>(null);
   const expanded = expandedFor === selected;
@@ -218,6 +227,15 @@ export function Hud({ app }: { app: App }) {
     compact: narrow && !expanded,
     onToggle: narrow ? () => setExpandedFor(expanded ? null : selected) : null,
   };
+  // --- r3/tour: while the intro plays, only its captions and Skip ---
+  if (touring) {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-10">
+        <TourOverlay app={app} />
+      </div>
+    );
+  }
+  // --- end r3/tour
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
@@ -231,6 +249,8 @@ export function Hud({ app }: { app: App }) {
           One Cubic Millimetre
         </h1>
         <StatusLine app={app} />
+        <TimeStatus app={app} /> {/* r3/tour */}
+        <TimeControl app={app} /> {/* r3/tour */}
       </header>
 
       <About app={app} open={aboutOpen} setOpen={setAboutOpen} />
@@ -256,6 +276,9 @@ export function Hud({ app }: { app: App }) {
       )}
 
       <Hint coarse={coarse} />
+      {aboutOpen || coarse ? null : <div className="absolute bottom-[4.25rem] right-6 max-[519px]:hidden"><Minimap app={app} /></div>} {/* r3/tour */}
+      <ScreenshotButton app={app} /> {/* r3/tour */}
+      <ScreenshotToast app={app} /> {/* r3/tour */}
       {coarse ? <TouchPad app={app} /> : null}
     </div>
   );

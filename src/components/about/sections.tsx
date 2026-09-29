@@ -137,6 +137,11 @@ const CONTROLS: [string, string][] = [
   ["Q / E", "Down and up"],
   ["Shift", "Fly faster"],
   ["Mouse", "Look around, once the mouse is captured by a click"],
+  // --- r3/tour ---
+  ["H", "Fly back to the starting view"],
+  [", / .", "Slow the simulation to a tenth, or back to normal speed"],
+  ["P", "Save a screenshot of the view at twice the resolution"],
+  // --- end r3/tour
 ];
 
 export function Controls() {
