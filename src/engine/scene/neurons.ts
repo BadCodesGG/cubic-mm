@@ -470,7 +470,7 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots
   const coverage = min(radiusPx.div(drawnPx), 1);
   // Far structure drifts toward the haze tint, near structure keeps its own hue.
   const tint = mix(u.hazeTint, info.rgb, h.pow(0.35));
-  const vBase = varying(tint.mul(info.a).mul(mix(float(1), u.axonGain, isAxon)).mul(u.exposure));
+  const vBase = varying(tint.mul(info.a).mul(mix(float(1), u.axonGain, isAxon)).mul(u.exposure).mul(u.introFade));
   const vAlpha = varying(
     u.opacity.mul(coverage).mul(h).mul(mix(float(1), u.axonAlpha, isAxon)).mul(sqrt(info.a)),
   );
@@ -551,7 +551,8 @@ function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots):
   const body = warm
     .mul(float(0.55).add(info.a.mul(0.45)))
     .mul(pow(facing, 3).mul(0.5).add(pow(float(1).sub(facing), 3).mul(0.12)))
-    .mul(u.somaGain);
+    .mul(u.somaGain)
+    .mul(u.introFade);
   const { pulse, after } = spikeGlow(u, spikeA, spikeB, float(0), u.somaAfterglow);
   // A soma is 2.5 to 4.5 µm across; once it is larger than glowCapPx on screen its flash keeps a
   // constant total light instead of growing with its area.

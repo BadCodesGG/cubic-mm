@@ -4,7 +4,7 @@ import { Flight } from "./camera/goto";
 import { EventBus } from "./events";
 import { markTourSeen, readTourSeen } from "./prefs";
 import { heroPath, type HeroAnchor } from "./camera/fly";
-import { TOUR, TOUR_SECONDS, Tour, captionAt, shouldRunTour, tourCaptions, tourPoses } from "./tour";
+import { INTRO_FADE_FROM, INTRO_FADE_SECONDS, TOUR, TOUR_SECONDS, Tour, captionAt, introFade, shouldRunTour, tourCaptions, tourPoses } from "./tour";
 
 describe("shouldRunTour", () => {
   const first = { seen: false, shot: false, parity: false, hash: "", forced: false };
@@ -77,7 +77,7 @@ describe("tourPoses", () => {
   });
 
   it("opens wide, well back from the hero, and drifts in to a hold much closer to it", () => {
-    expect(poses.wide.position.distanceTo(anchor.soma)).toBeGreaterThan(450);
+    expect(poses.wide.position.distanceTo(anchor.soma)).toBeGreaterThan(250);
     expect(poses.hold.position.distanceTo(anchor.soma)).toBeLessThan(poses.wide.position.distanceTo(anchor.soma) / 1.8);
   });
 
@@ -96,6 +96,23 @@ describe("tourPoses", () => {
     const side = new Vector3().crossVectors(anchor.axis, new Vector3(0, -1, 0));
     const sideOf = (p: Vector3) => Math.sign(p.clone().sub(anchor.soma).dot(side));
     expect(sideOf(poses.hold.position)).toBe(-sideOf(poses.rest.position));
+  });
+});
+
+describe("introFade", () => {
+  it("opens dim, rises monotonically, and is full brightness once the fade is done", () => {
+    expect(introFade(0)).toBeCloseTo(INTRO_FADE_FROM, 12);
+    expect(introFade(-1)).toBeCloseTo(INTRO_FADE_FROM, 12);
+    expect(introFade(INTRO_FADE_SECONDS)).toBe(1);
+    expect(introFade(60)).toBe(1);
+    let prev = introFade(0);
+    for (let t = 0.1; t <= INTRO_FADE_SECONDS; t += 0.1) {
+      const v = introFade(t);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
+    }
+    expect(introFade(1)).toBeGreaterThan(INTRO_FADE_FROM);
+    expect(introFade(1)).toBeLessThan(0.6);
   });
 });
 

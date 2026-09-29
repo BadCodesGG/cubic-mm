@@ -132,13 +132,20 @@ export class LinkSync {
     this.write();
   }
 
-  /** Write the current link now if it differs from the last one written. */
+  /** Write the current link now if it differs from the last one written. A no-op while paused. */
   flush(): void {
+    if (this.paused) return;
     if (this.last === null) this.last = "";
     this.write();
   }
 
-  /** Hold the timed writes, for the intro tour, whose mid-flight camera is not a link worth keeping. */
+  /** Take the current view as the baseline without writing it: the view a paused stretch (the tour) came to rest at. */
+  rebase(): void {
+    this.last = this.current();
+    this.lastWriteAt = this.now;
+  }
+
+  /** Hold every write, for the intro tour, whose mid-flight camera is not a link worth keeping. Follow it with `rebase()`. */
   pause(paused: boolean): void {
     this.paused = paused;
   }
