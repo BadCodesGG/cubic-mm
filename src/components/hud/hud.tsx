@@ -5,6 +5,10 @@ import type { App } from "@/engine/app";
 import { describeNeuron, formatCount } from "@/engine/info";
 import { FOCUS, NeuronPanel, SummaryPanel, type PanelView } from "./panels";
 import { TouchPad } from "./touch-pad";
+// --- r3/links ---
+import { Search } from "./search";
+import { CopyLink } from "./share";
+// --- end r3/links ---
 import { useCoarsePointer, useHudFrame, useMedia, useReducedMotion, useSelection, useStatus, type FrameSnap } from "./use-hud";
 // --- r3/tour ---
 import { useTourRunning } from "./use-hud";
@@ -263,9 +267,9 @@ export function Hud({ app }: { app: App }) {
         }`}
       >
         {selected >= 0 ? (
-          <NeuronPanel app={app} neuron={selected} ride={frame.ride} rideNeuron={frame.rideNeuron} view={view} />
+          <NeuronPanel app={app} neuron={selected} ride={frame.ride} rideNeuron={frame.rideNeuron} view={view} actions={<CopyLink app={app} />} /* r3/links */ />
         ) : (
-          <SummaryPanel app={app} view={view} />
+          <SummaryPanel app={app} view={view} actions={<CopyLink app={app} />} /* r3/links */ />
         )}
       </div>
 
@@ -279,6 +283,8 @@ export function Hud({ app }: { app: App }) {
       {aboutOpen || coarse ? null : <div className="absolute bottom-[4.25rem] right-6 max-[519px]:hidden"><Minimap app={app} /></div>} {/* r3/tour */}
       <ScreenshotButton app={app} /> {/* r3/tour */}
       <ScreenshotToast app={app} /> {/* r3/tour */}
+      {/* r3/links */}
+      <Search app={app} />
       {coarse ? <TouchPad app={app} /> : null}
     </div>
   );

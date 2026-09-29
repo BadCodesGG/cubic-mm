@@ -33,7 +33,7 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
-function ActionButton({
+export function ActionButton({
   onClick,
   children,
   primary,
@@ -89,12 +89,15 @@ export function NeuronPanel({
   ride,
   rideNeuron,
   view,
+  actions,
 }: {
   app: App;
   neuron: number;
   ride: RideState;
   rideNeuron: number;
   view: PanelView;
+  /** Extra buttons at the end of the action row. */
+  actions?: ReactNode;
 }) {
   const info = useMemo(() => describeNeuron(app.data, neuron), [app, neuron]);
   const pia = useMemo(() => piaDepth(app.data), [app]);
@@ -167,6 +170,7 @@ export function NeuronPanel({
         <ActionButton onClick={() => app.bus.emit("select", { neuron: -1 })}>
           Deselect <Kbd>Esc</Kbd>
         </ActionButton>
+        {actions}
       </div>
       <p className="mt-2 min-h-4 text-[11px] text-cyan-200/80" role="status">
         {note}
@@ -175,7 +179,7 @@ export function NeuronPanel({
   );
 }
 
-export function SummaryPanel({ app, view }: { app: App; view: PanelView }) {
+export function SummaryPanel({ app, view, actions }: { app: App; view: PanelView; actions?: ReactNode }) {
   const s = useMemo(() => datasetSummary(app.data), [app]);
   const approx = s.lod === "lite" ? "about " : "";
   return (
@@ -212,6 +216,7 @@ export function SummaryPanel({ app, view }: { app: App; view: PanelView }) {
         </dl>
       )}
       <p className="mt-2 text-[12px] text-slate-400">Click a cell to read its numbers.</p>
+      {actions ? <div className="mt-2.5 flex flex-wrap gap-1.5">{actions}</div> : null}
     </section>
   );
 }
