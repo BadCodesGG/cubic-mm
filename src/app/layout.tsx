@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,9 +13,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// No openGraph.images or twitter.images here: src/app/opengraph-image.tsx supplies them for every
+// route that does not declare its own openGraph block (and /about restates them).
 export const metadata: Metadata = {
-  title: "One Cubic Millimetre",
-  description: "Walk through a real cubic millimetre of mouse brain: real neurons, real wiring, a live simulation.",
+  metadataBase: new URL(SITE_URL),
+  title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  openGraph: { type: "website", siteName: SITE_NAME, title: SITE_NAME, description: SITE_DESCRIPTION },
+  twitter: { card: "summary_large_image", title: SITE_NAME, description: SITE_DESCRIPTION },
 };
 
 export const viewport: Viewport = {
