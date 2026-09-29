@@ -3,10 +3,15 @@
  * and every soma one instance of a sphere. Both are additive light, so the volume reads as a
  * haze of faint structure that brightens only where it is dense, near, or carrying a spike.
  *
- * Per-neuron data lives in two float textures indexed by neuron number, read in the vertex
- * stage with `textureLoad`, which works identically on the WebGPU and WebGL2 backends:
- *   info:   one texel per neuron, rgb = base tint (linear), a = brightness
- *   spikes: two texels per neuron, the last 8 spike times in seconds (ring buffer)
+ * Per-neuron data is indexed by neuron number and read in the vertex stage:
+ *   info:   a float texture, one texel per neuron, rgb = base tint (linear), a = brightness
+ *   spikes: the last 8 spike times in seconds (ring buffer). With the GPU simulation this is the
+ *           simulation's own storage buffer, read directly; otherwise a float texture of two
+ *           texels per neuron that `update()` refreshes from the CPU worker. `spikeSlots` is the
+ *           one accessor both paths go through, so the shaders are written once.
+ *
+ * On top of the ribbons: a point of light riding each pulse front along the neuron's longest
+ * axon branch, and a brief glow on the dendrite at each synapse as a pulse lands there.
  */
 
 import {
@@ -32,6 +37,7 @@ import {
 import {
   abs,
   attribute,
+  clamp,
   cameraProjectionMatrix,
   cross,
   exp,
@@ -53,20 +59,26 @@ import {
   smoothstep,
   sqrt,
   step,
+  storage,
   textureLoad,
+  uint,
   varying,
   vec3,
   vec4,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
-import { NO_PARENT, PATH_DIST_UNIT_UM, dequantise } from "../format";
+import { NO_PARENT, PATH_DIST_UNIT_UM, dequantise, type SynapseTable } from "../format";
 import type { Dataset } from "../data";
 import { rng } from "../synth";
+import { EMPTY_SPIKE, SPIKE_SLOTS } from "../sim/model";
+import type { SpikeTimesSource } from "../sim";
 import type { SceneUniforms } from "./uniforms";
 
-export const SPIKE_SLOTS = 8;
+export { SPIKE_SLOTS };
 /** Spike slots start here: long enough ago that nothing glows. */
-export const NEVER = -1e4;
+export const NEVER = EMPTY_SPIKE;
+/** Samples of each neuron's longest axon branch, evenly spaced in path length, for the pulse sprites. */
+const PATH_SAMPLES = 128;
 const TEX_WIDTH = 1024;
 /** Longest piece a skeleton edge is drawn with, µm. */
 const PIECE_UM = 3;
@@ -92,7 +104,7 @@ function makeTexture(texels: number): DataTexture {
 }
 
 /** Texel coordinate of the `k`th texel of a record of `stride` texels for record `index`. */
-function texel(index: FloatNode, stride: number, k: number) {
+function texel(index: FloatNode, stride: number, k: number | FloatNode) {
   const t = index.mul(stride).add(k);
   return ivec2(mod(t, TEX_WIDTH).toInt(), floor(t.div(TEX_WIDTH)).toInt());
 }
@@ -118,6 +130,28 @@ function createNeuronTextures(data: Dataset): NeuronTextures {
     infoData.set([c.r, c.g, c.b, 0.1 + v * v * v * 1.25], i * 4);
   }
   return { info, spikes, spikeTimes };
+}
+
+type SlotPair = [Node<"vec4">, Node<"vec4">];
+/** Reads one neuron's 8 spike slots as two vec4s, from whichever store the simulation feeds. */
+type SpikeSlots = (neuron: FloatNode) => SlotPair;
+
+function spikeSlots(tex: NeuronTextures, source: SpikeTimesSource | undefined): SpikeSlots {
+  if (source?.kind === "storage") {
+    const buf = storage(source.attribute, "float", source.attribute.count).toReadOnly();
+    return (neuron) => {
+      const base = neuron.toUint().mul(SPIKE_SLOTS);
+      const at = (k: number) => buf.element(base.add(k));
+      return [vec4(at(0), at(1), at(2), at(3)), vec4(at(4), at(5), at(6), at(7))];
+    };
+  }
+  return (neuron) => [textureLoad(tex.spikes, texel(neuron, 2, 0)), textureLoad(tex.spikes, texel(neuron, 2, 1))];
+}
+
+/** Spike light falls off with view depth on top of the haze, so near activity is what reads. */
+function spikeNear(u: SceneUniforms, depth: FloatNode) {
+  const x = depth.div(u.spikeNearUm);
+  return float(1).div(x.mul(x).add(1));
 }
 
 /** Sum of the spike pulse and its afterglow over one neuron's 8 slots, at path distance `path` µm. */
@@ -183,6 +217,12 @@ function nodeTangents(count: number, parent: Uint32Array, compartment: Uint8Arra
 export interface Neurons {
   ribbons: Mesh;
   somas: InstancedMesh;
+  /** A point of light riding every pulse front along each neuron's longest axon branch. */
+  pulses: Mesh;
+  /** A brief glow at each synapse as a pulse lands on it; null without a synapse table. */
+  synapseGlow: Mesh | null;
+  /** Uploads new spike times when they come from the CPU worker; a no-op on the GPU path. */
+  update(): void;
   textures: NeuronTextures;
   instanceCount: number;
   /** World-space soma centres, µm. */
@@ -194,10 +234,18 @@ export interface Neurons {
  * @param maxPieces Most pieces one skeleton edge is split into for smooth curves; lower it on
  *   weaker backends, since it multiplies the instance count.
  */
-export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3): Neurons {
+export interface NeuronOptions {
+  /** Where spike times come from. Without one they stay empty and nothing fires. */
+  spikes?: SpikeTimesSource;
+  /** Synapses to draw arrival glows at. */
+  synapses?: SynapseTable | null;
+}
+
+export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3, opts: NeuronOptions = {}): Neurons {
   const { nodes, manifest } = data;
   const { min: bmin, max: bmax } = manifest.boundsUm;
   const textures = createNeuronTextures(data);
+  const slots = spikeSlots(textures, opts.spikes);
 
   // Dequantise every node once.
   const pos = new Float32Array(nodes.count * 3);
@@ -311,13 +359,13 @@ export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3): N
   geometry.setAttribute("aTB", new InstancedBufferAttribute(tb, 3));
   geometry.instanceCount = edges;
 
-  const ribbons = new Mesh(geometry, ribbonMaterial(u, textures));
+  const ribbons = new Mesh(geometry, ribbonMaterial(u, textures, slots));
   ribbons.frustumCulled = false;
 
   // Somas.
   const somaCount = data.neurons.count;
   const somaPos = new Float32Array(somaCount * 3);
-  const somas = new InstancedMesh(new SphereGeometry(1, 32, 20), somaMaterial(u, textures), somaCount);
+  const somas = new InstancedMesh(new SphereGeometry(1, 32, 20), somaMaterial(u, textures, slots), somaCount);
   const m = new Matrix4();
   const v = new Vector3();
   for (let n = 0; n < somaCount; n++) {
@@ -331,13 +379,33 @@ export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3): N
   somas.instanceMatrix.needsUpdate = true;
   somas.frustumCulled = false;
 
+  const pathTex = axonPathTexture(data, pos);
+  const pulses = pulseSprites(u, slots, pathTex, data.neurons.count);
+  const synapseGlow = opts.synapses?.count ? synapseSprites(u, slots, opts.synapses, bmin, bmax) : null;
+
+  const source = opts.spikes;
+  let uploaded = -1;
   return {
     ribbons,
     somas,
+    pulses,
+    synapseGlow,
     textures,
     instanceCount: edges,
     somaPos,
+    update() {
+      if (source?.kind !== "array" || source.version === uploaded) return;
+      uploaded = source.version;
+      textures.spikeTimes.set(source.times);
+      textures.spikes.needsUpdate = true;
+    },
     dispose() {
+      for (const m of [pulses, synapseGlow]) {
+        if (!m) continue;
+        m.geometry.dispose();
+        (m.material as MeshBasicNodeMaterial).dispose();
+      }
+      pathTex.dispose();
       geometry.dispose();
       (ribbons.material as MeshBasicNodeMaterial).dispose();
       somas.geometry.dispose();
@@ -354,7 +422,7 @@ function haze(u: SceneUniforms, depth: FloatNode) {
   return exp(depth.div(u.hazeDistance).negate());
 }
 
-function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMaterial {
+function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots): MeshBasicNodeMaterial {
   const aA = attribute("aA", "vec4");
   const aB = attribute("aB", "vec4");
   const aC = attribute("aC", "vec4");
@@ -390,8 +458,9 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMat
   const vDepth = varying(depth);
   const vCompartment = varying(aC.w);
   const vInfo = varying(textureLoad(tex.info, texel(neuron, 1, 0)));
-  const vSpikeA = varying(textureLoad(tex.spikes, texel(neuron, 2, 0)));
-  const vSpikeB = varying(textureLoad(tex.spikes, texel(neuron, 2, 1)));
+  const [spikeA, spikeB] = slots(neuron);
+  const vSpikeA = varying(spikeA);
+  const vSpikeB = varying(spikeB);
 
   const vRadiusPx = varying(radiusPx);
   const isAxon = step(0.5, vCompartment).mul(step(vCompartment, 1.5));
@@ -416,7 +485,10 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMat
   const { pulse, after } = spikeGlow(u, vSpikeA, vSpikeB, vPath);
   // Back-propagating spikes reach into the dendrites weakly and die out with distance.
   const glowGain = mix(exp(vPath.negate().div(90)).mul(0.35), float(1), isAxon);
-  const glow = u.spikeColor.mul(pulse.mul(u.spikeGain).add(after.mul(u.afterglowGain))).mul(glowGain);
+  const glow = u.spikeColor
+    .mul(pulse.mul(u.spikeGain).add(after.mul(u.afterglowGain)))
+    .mul(glowGain)
+    .mul(spikeNear(u, vDepth));
   const fade = h.mul(nearFade);
   // Premultiplied "over" blending: each ribbon partly hides what is behind it, so dense tangles
   // settle toward the ribbons' own colour instead of summing to white. The spike glow rides on
@@ -440,11 +512,12 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMat
   return material;
 }
 
-function somaMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMaterial {
+function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots): MeshBasicNodeMaterial {
   const neuron = instanceIndex.toFloat();
   const info = varying(textureLoad(tex.info, texel(neuron, 1, 0)));
-  const spikeA = varying(textureLoad(tex.spikes, texel(neuron, 2, 0)));
-  const spikeB = varying(textureLoad(tex.spikes, texel(neuron, 2, 1)));
+  const [slotA, slotB] = slots(neuron);
+  const spikeA = varying(slotA);
+  const spikeB = varying(slotB);
 
   const depth = positionView.z.negate();
   const facing = abs(normalView.dot(positionView.normalize().negate()));
@@ -458,7 +531,8 @@ function somaMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMater
   const { pulse, after } = spikeGlow(u, spikeA, spikeB, float(0), u.somaAfterglow);
   const glow = u.spikeColor
     .mul(pulse.mul(u.spikeGain).add(after.mul(u.somaAfterglowGain)))
-    .mul(float(0.3).add(facing.mul(0.7)));
+    .mul(float(0.3).add(facing.mul(0.7)))
+    .mul(spikeNear(u, depth));
 
   const material = new MeshBasicNodeMaterial();
   material.colorNode = vec4(body.add(glow).mul(haze(u, depth)).mul(smoothstep(8, 60, depth)), 1);
@@ -466,4 +540,152 @@ function somaMaterial(u: SceneUniforms, tex: NeuronTextures): MeshBasicNodeMater
   material.depthWrite = false;
   material.blending = AdditiveBlending;
   return material;
+}
+
+/**
+ * Each neuron's longest axon branch (soma to its farthest axon tip), resampled at PATH_SAMPLES
+ * points evenly spaced in path length: rgb = position, a = the branch's total length in µm.
+ * A neuron with no axon keeps length 0 and never shows a pulse sprite.
+ */
+function axonPathTexture(data: Dataset, pos: Float32Array): DataTexture {
+  const { nodes } = data;
+  const n = data.neurons.count;
+  const tex = makeTexture(n * PATH_SAMPLES);
+  const out = tex.image.data as Float32Array;
+  const pathUm = (i: number) => nodes.pathDistQ[i] * PATH_DIST_UNIT_UM;
+  const chain: number[] = [];
+  for (let k = 0; k < n; k++) {
+    const start = data.neuronNodeStart[k];
+    const end = start + data.neuronNodeCount[k];
+    let tip = -1;
+    for (let i = start; i < end; i++) {
+      if (nodes.compartment[i] === 1 && (tip < 0 || nodes.pathDistQ[i] > nodes.pathDistQ[tip])) tip = i;
+    }
+    if (tip < 0) continue;
+    chain.length = 0;
+    for (let i = tip; i !== NO_PARENT && chain.length <= end - start; i = nodes.parent[i]) chain.push(i);
+    chain.reverse();
+    const len = pathUm(tip);
+    let j = 0;
+    for (let s = 0; s < PATH_SAMPLES; s++) {
+      const d = (s / (PATH_SAMPLES - 1)) * len;
+      while (j < chain.length - 2 && pathUm(chain[j + 1]) < d) j++;
+      const a = chain[j];
+      const b = chain[Math.min(j + 1, chain.length - 1)];
+      const span = pathUm(b) - pathUm(a);
+      const f = span > 0 ? Math.min(1, Math.max(0, (d - pathUm(a)) / span)) : 0;
+      const o = (k * PATH_SAMPLES + s) * 4;
+      for (let c = 0; c < 3; c++) out[o + c] = pos[a * 3 + c] + (pos[b * 3 + c] - pos[a * 3 + c]) * f;
+      out[o + 3] = len;
+    }
+  }
+  return tex;
+}
+
+/** A unit quad, corners in [-1, 1], drawn `count` times. */
+function quadGeometry(count: number): InstancedBufferGeometry {
+  const geometry = new InstancedBufferGeometry();
+  geometry.setAttribute("position", new Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  geometry.instanceCount = count;
+  return geometry;
+}
+
+/** Slot `slot` (0..7, a uint node) of a neuron's two spike vec4s. */
+function pickSlot([a, b]: SlotPair, slot: Node<"uint">): FloatNode {
+  const parts = [a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w];
+  let v: FloatNode = parts[0];
+  for (let k = 1; k < parts.length; k++) v = select(slot.equal(uint(k)), parts[k], v);
+  return v;
+}
+
+/**
+ * Additive camera-facing point lights. Sprites whose light is negligible collapse to zero size
+ * in the vertex stage, so the idle majority costs no fragments.
+ */
+function spriteMesh(
+  u: SceneUniforms,
+  geometry: InstancedBufferGeometry,
+  centre: Node<"vec3">,
+  intensity: FloatNode,
+  radiusUm: FloatNode,
+  color: Node<"vec3">,
+): Mesh {
+  const centreView = modelViewMatrix.mul(vec4(centre, 1)).xyz;
+  const depth = max(centreView.z.negate(), 0.5);
+  const pxPerUm = u.pixelScale.div(depth);
+  const radius = max(radiusUm, float(2.5).div(pxPerUm));
+  const light = intensity.mul(spikeNear(u, depth)).mul(haze(u, depth)).mul(smoothstep(4, 45, depth));
+  const size = select(light.greaterThan(0.002), radius, float(0));
+  const corner = positionLocal.xy;
+
+  const material = new MeshBasicNodeMaterial();
+  material.vertexNode = cameraProjectionMatrix.mul(vec4(centreView.add(vec3(corner.mul(size), 0)), 1));
+  const vCorner = varying(corner);
+  const vLight = varying(light);
+  const falloff = exp(vCorner.dot(vCorner).mul(-4));
+  material.colorNode = vec4(color.mul(vLight).mul(falloff), 1);
+  material.transparent = true;
+  material.depthWrite = false;
+  material.blending = AdditiveBlending;
+
+  const mesh = new Mesh(geometry, material);
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+/** One sprite per (neuron, spike slot), riding that spike's front along the longest axon branch. */
+function pulseSprites(u: SceneUniforms, slots: SpikeSlots, pathTex: DataTexture, neuronCount: number): Mesh {
+  const neuron = instanceIndex.div(SPIKE_SLOTS).toFloat();
+  const tau = pickSlot(slots(neuron), instanceIndex.bitAnd(SPIKE_SLOTS - 1));
+  const len = textureLoad(pathTex, texel(neuron, PATH_SAMPLES, 0)).w;
+  // Inverse of the ribbon shader's delay: how far along the path the front is now, µm.
+  const d = u.time.sub(tau).mul(u.velocity).div(u.slowMo.mul(1e-6));
+  const f = clamp(d.div(max(len, 1e-3)), 0, 1).mul(PATH_SAMPLES - 1);
+  const i0 = floor(f);
+  const i1 = min(i0.add(1), PATH_SAMPLES - 1);
+  const p = mix(
+    textureLoad(pathTex, texel(neuron, PATH_SAMPLES, i0)).xyz,
+    textureLoad(pathTex, texel(neuron, PATH_SAMPLES, i1)).xyz,
+    f.sub(i0),
+  );
+  const alive = step(0, d)
+    .mul(step(d, len))
+    .mul(smoothstep(0, 12, d))
+    .mul(float(1).sub(smoothstep(len.sub(25), len, d)));
+  const color = mix(u.spikeColor, vec3(1, 0.95, 0.85), 0.5);
+  return spriteMesh(u, quadGeometry(neuronCount * SPIKE_SLOTS), p, alive.mul(u.pulseSpriteGain), u.pulseSpriteUm, color);
+}
+
+/** One sprite per synapse, lit briefly each time a pulse from its presynaptic cell lands there. */
+function synapseSprites(
+  u: SceneUniforms,
+  slots: SpikeSlots,
+  syn: SynapseTable,
+  bmin: [number, number, number],
+  bmax: [number, number, number],
+): Mesh {
+  const geometry = quadGeometry(syn.count);
+  const at = new Float32Array(syn.count * 4);
+  const pre = new Float32Array(syn.count);
+  for (let s = 0; s < syn.count; s++) {
+    for (let k = 0; k < 3; k++) at[s * 4 + k] = dequantise(syn.pos[s * 3 + k], bmin[k], bmax[k]);
+    at[s * 4 + 3] = syn.preDistQ[s] * PATH_DIST_UNIT_UM;
+    pre[s] = syn.pre[s];
+  }
+  geometry.setAttribute("aSyn", new InstancedBufferAttribute(at, 4));
+  geometry.setAttribute("aPre", new InstancedBufferAttribute(pre, 1));
+  const aSyn = attribute("aSyn", "vec4");
+  const aPre = attribute("aPre", "float");
+
+  const [a, b] = slots(aPre);
+  const delay = aSyn.w.mul(u.slowMo).mul(1e-6).div(u.velocity).add(u.synDelay);
+  let glow: FloatNode = float(0);
+  for (const s of [a.x, a.y, a.z, a.w, b.x, b.y, b.z, b.w]) {
+    const dt = u.time.sub(s.add(delay));
+    // A 20 ms rise so it does not pop, then an exponential fade.
+    glow = glow.add(smoothstep(-0.02, 0, dt).mul(exp(max(dt, 0).negate().div(u.synapseGlowDecay))));
+  }
+  const color = mix(u.spikeColor, vec3(1, 0.92, 0.8), 0.35);
+  return spriteMesh(u, geometry, aSyn.xyz, glow.mul(u.synapseGlowGain), u.synapseGlowUm, color);
 }
