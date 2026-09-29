@@ -475,7 +475,7 @@
   },
   "synapses": {
     "file": "synapses.bin",
-    "count": 180258
+    "count": 156882
   },
   "credits": {
     "dataset": "MICrONS minnie65 (cubic millimetre of mouse visual cortex), proofread skeletons v1300 and aibs_cell_info",

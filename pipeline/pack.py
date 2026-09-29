@@ -590,7 +590,11 @@ def pack_synapses(rows, results, order, lo, hi, log) -> tuple[bytes, dict]:
         fallback[sel] = res["fallback"]
         has_axon[sel] = True
     dropped = int((~has_axon).sum())
-    keep = np.flatnonzero(has_axon)
+    # A synapse a cell makes onto itself (an autapse) is real in the table, but in a point-neuron model
+    # it is a self-loop that only inflates a cell's own input and its synapse counts. Dropped, and said so.
+    autapse = pre_idx == post_idx
+    autapses_dropped = int((has_axon & autapse).sum())
+    keep = np.flatnonzero(has_axon & ~autapse)
     if len(keep) == 0:
         raise ValueError("no synapse has a presynaptic axon")
 
@@ -620,7 +624,7 @@ def pack_synapses(rows, results, order, lo, hi, log) -> tuple[bytes, dict]:
     data = w.finish(b"CMS1" + u32le(count, n_neurons))
     log(f"synapses: {n_rows:,} between selected neurons; {dropped:,} dropped (presynaptic neuron has no axon "
         f"nodes); {count:,} packed; {int(fallback.sum()):,} placed on the nearest "
-        f"non-axon node (no axon within {AXON_MATCH_UM} um); {int((pre_idx == post_idx).sum()):,} autapses kept; "
+        f"non-axon node (no axon within {AXON_MATCH_UM} um); {autapses_dropped:,} autapses dropped; "
         f"{outside:,} clamped into the bounds; size max {size.max():,.0f}")
     log(f"synapses.bin: {len(data):,} bytes")
     return data, {"file": "synapses.bin", "count": count}
