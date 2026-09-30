@@ -11,6 +11,7 @@
  * `?budgetMs=N` sets the frame budget adapting steps down against (default 20 ms).
  * `?tour=1` plays the intro tour even when it has been seen; with `&t=N` it runs on a fixed clock
  * and holds at N tour seconds, so a shot of any moment of the tour is reproducible.
+ * `?story=<id>` plays a guided story (stories.ts); with `&t=N` it holds at N story seconds the same way.
  */
 
 import { PerspectiveCamera, Scene, Vector3 } from "three/webgpu";
@@ -55,6 +56,10 @@ import { createCascadeLines } from "./scene/cascade";
 import { PREVIEW_S, WiringState, buildPartnerIndex, type PartnerIndex } from "./partners";
 import { createPartnerGraph } from "./scene/partners";
 // --- end r4/graph ---
+// --- r4/stories ---
+import { StoryPlayer, buildStories } from "./stories";
+import { createInhibitionMarks } from "./scene/neurons";
+// --- end r4/stories
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -127,7 +132,24 @@ export interface App {
   /** Which cell's graph is pinned (`pinned`), or -1. */
   wiring: WiringState;
   // --- end r4/graph ---
+  // --- r4/stories ---
+  stories: StoriesHandle;
+  // --- end r4/stories
 }
+
+// --- r4/stories ---
+export interface StoriesHandle {
+  /** The stories this dataset can tell, in menu order. */
+  list: readonly { id: string; title: string; blurb: string }[];
+  running(): boolean;
+  /** The story playing, or null. */
+  id(): string | null;
+  /** The caption on screen now, or null. */
+  caption(): string | null;
+  start(id: string): void;
+  skip(): void;
+}
+// --- end r4/stories
 
 export interface CmmDebug {
   isWebGPU: boolean;
@@ -198,6 +220,9 @@ export interface CmmDebug {
     state(): { hover: number; pinned: number };
   };
   // --- end r4/graph ---
+  // --- r4/stories ---
+  story?: { id: string | null; time: number; caption: string | null };
+  // --- end r4/stories
 }
 
 declare global {
@@ -363,8 +388,14 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   };
   window.addEventListener("keydown", onWiringKey);
   // --- end r4/graph ---
+  // --- r4/stories: where an inhibitory story cell's pulses just landed; kept across quality rebuilds ---
+  const inhibitionMarks = createInhibitionMarks(data.neurons.count);
+  bus.on("arrive", ({ pre, post, time }) => {
+    if (pre === u.inhibitNeuron.value) inhibitionMarks.mark(post, time);
+  });
+  // --- end r4/stories
   const buildNeurons = (d: Dataset, pieces: Pieces): Neurons => {
-    const built = createNeurons(d, u, pieces, { spikes: sim.spikeTimesSource, synapses: sim.synapses });
+    const built = createNeurons(d, u, pieces, { spikes: sim.spikeTimesSource, synapses: sim.synapses, inhibition: inhibitionMarks });
     scene.add(built.ribbons, built.somas, built.pulses);
     if (built.synapseGlow) scene.add(built.synapseGlow);
     return built;
@@ -649,6 +680,78 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   };
   window.addEventListener("keydown", onAppKey);
 
+  // --- r4/stories: guided stories, played like the tour through the same flight ---
+  const storyDefs = buildStories(
+    data,
+    { reached: () => sim.firstHop().length, cascade: () => cascade.summary() },
+    { conductionMps: sim.params.conductionMps, slowMo: sim.params.slowMo, synDelayS: sim.params.synDelayMs / 1000 },
+  );
+  const story = new StoryPlayer({
+    bus,
+    fly: (p, seconds) => {
+      ride.cancel();
+      flight.start(p, seconds);
+    },
+    place: (p) => {
+      flight.cancel();
+      ride.cancel();
+      camera.position.copy(p.position);
+      camera.up.copy(WORLD_UP);
+      camera.lookAt(p.target);
+      // The controls run between flights; they must look where the orbit looks.
+      controls?.lookAt(p.target);
+    },
+    rest: () => restPose,
+    // A story that plays out hands the visitor its cell, selected, where it ended.
+    onEnd: (id, reason) => {
+      const def = storyDefs.find((d) => d.id === id);
+      if (def && reason === "done") bus.emit("select", { neuron: def.neuron });
+    },
+  });
+  const storyParam = params.get("story");
+  /** `?story=<id>&t=N`: the story on a fixed 60 Hz clock, held N real seconds in (waits included). */
+  const storyHoldAt = storyParam && opts.holdAt !== undefined && !scripted ? opts.holdAt : null;
+  const startStory = (id: string) => {
+    const def = storyDefs.find((d) => d.id === id);
+    if (scripted || !def) return;
+    if (tour.running) tour.skip();
+    ride.cancel();
+    // Start first: it pauses the link sync, so the deselect below does not write a hash.
+    story.start(def);
+    bus.emit("select", { neuron: -1 });
+    bus.emit("timeScale", { scale: 1 });
+  };
+  bus.on("story", (e) => {
+    // The story's cell is drawn through the haze, and an inhibitory one's pulses land violet.
+    const def = e.id === null ? null : storyDefs.find((d) => d.id === e.id);
+    u.focusNeuron.value = def ? def.neuron : -1;
+    u.inhibitNeuron.value = def && data.neurons.inhibitory[def.neuron] && def.id === "basket" ? def.neuron : -1;
+    inhibitionMarks.clear();
+    // Story cameras are not links either; the sync resumes once the last flight lands.
+    linkResume = e.id === null && !tour.running;
+    if (e.id !== null) link?.pause(true);
+  });
+  // Replaying the intro ends a story.
+  bus.on("tour", (e) => {
+    if (e.running && story.running) story.cancel();
+  });
+  // Any input skips a story, as it does the tour; buttons keep working.
+  const onStoryInput = (e: Event) => {
+    if (e.type === "click" || !story.running || storyHoldAt !== null) return;
+    if (e.target instanceof Element && e.target.closest("button, a, [role='button']")) return;
+    if (e instanceof KeyboardEvent && (MODIFIERS.has(e.code) || e.ctrlKey || e.metaKey || e.altKey)) return;
+    e.stopPropagation();
+    if (e.type === "keydown") e.preventDefault();
+    if (e.type === "pointerdown" || e.type === "touchstart") swallowClickUntil = performance.now() + 1000;
+    story.skip();
+  };
+  for (const type of TOUR_INPUT) {
+    window.addEventListener(type, onStoryInput, { capture: true, passive: type === "wheel" || type === "touchstart" });
+  }
+  const debugStory: NonNullable<CmmDebug["story"]> = { id: null, time: 0, caption: null };
+  debug.story = debugStory;
+  // --- end r4/stories
+
   const shotListeners = new Set<(filename: string | null) => void>();
   let shotPending = false;
   bus.on("screenshot", () => {
@@ -713,8 +816,18 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       camera.lookAt(pose.target);
     } else {
       // --- r3/tour: the time scale slows the simulation only; the tour and flights keep real time ---
-      const step = tourHoldAt === null ? dt : tour.time < tourHoldAt - 1e-9 ? 1 / 60 : 0;
+      let step = tourHoldAt === null ? dt : tour.time < tourHoldAt - 1e-9 ? 1 / 60 : 0;
       if (tourHoldAt !== null) debug.settled = step === 0;
+      // --- r4/stories: the story's timeline runs before the flights it starts are advanced ---
+      if (storyHoldAt !== null) {
+        step = story.elapsed < storyHoldAt - 1e-9 ? 1 / 60 : 0;
+        debug.settled = step === 0;
+      }
+      story.update(step);
+      debugStory.id = story.id;
+      debugStory.time = story.time;
+      debugStory.caption = story.caption();
+      // --- end r4/stories
       simTime += step * timeScale;
       tour.update(step);
       // The tour opens dim and fades up; after a skip the light returns over a second instead of jumping.
@@ -804,6 +917,7 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   // --- r3/tour: the tour places the camera before the first frame is drawn ---
   if (shouldRunTour({ seen: readTourSeen(), shot, parity, hash: window.location.hash, forced: opts.tour === true })) startTour();
   // --- end r3/tour
+  if (storyParam) startStory(storyParam); // r4/stories
   await renderer.setAnimationLoop(loop);
   // --- r1/nav ---
   if (opts.select === "hero") bus.emit("select", { neuron: hero.neuron });
@@ -851,6 +965,16 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     cascade, // r3/cascade
     partners: partnerIndex, // r4/graph
     wiring, // r4/graph
+    // --- r4/stories ---
+    stories: {
+      list: storyDefs.map(({ id, title, blurb }) => ({ id, title, blurb })),
+      running: () => story.running,
+      id: () => story.id,
+      caption: () => story.caption(),
+      start: startStory,
+      skip: () => story.skip(),
+    },
+    // --- end r4/stories
     dispose() {
       // --- r1/nav ---
       ride.dispose();
@@ -861,6 +985,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       // --- r3/tour ---
       for (const type of TOUR_INPUT) window.removeEventListener(type, onTourInput, { capture: true });
       window.removeEventListener("keydown", onAppKey);
+      // --- r4/stories ---
+      for (const type of TOUR_INPUT) window.removeEventListener(type, onStoryInput, { capture: true });
+      inhibitionMarks.dispose();
+      // --- end r4/stories
       flight.cancel();
       shotListeners.clear();
       // --- end r3/tour

@@ -71,6 +71,18 @@ export function createSceneUniforms() {
 
     /** Neuron index the visitor has selected, or -1. Written by app.ts on `select`; materials may read it to highlight. */
     selectedNeuron: uniform(-1),
+    // --- r4/stories ---
+    /** A cell whose pulses land violet on its targets, which dim briefly (the basket-cell story), or -1. */
+    inhibitNeuron: uniform(-1),
+    inhibitColor: uniform(new Color(0.62, 0.34, 1.0)),
+    /** A cell drawn through the haze from much further off, so a story can frame all of it, or -1. */
+    focusNeuron: uniform(-1),
+    /** The focus cell's haze distance and spike falloff, µm. */
+    focusHazeUm: uniform(700),
+    /** The focus cell's afterglow decay (s) and brightness: the trail its pulse leaves stays lit. */
+    focusAfterglow: uniform(1.2),
+    focusAfterglowGain: uniform(0.7),
+    // --- end r4/stories
   };
 }
 

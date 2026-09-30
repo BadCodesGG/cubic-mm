@@ -21,6 +21,9 @@ import { ScreenshotButton, ScreenshotToast } from "./screenshot";
 import { TimeControl, TimeStatus } from "./time";
 import { ReplayIntro, TourOverlay } from "./tour";
 // --- end r3/tour
+// --- r4/stories ---
+import { StoriesButton, StoryList, StoryOverlay, useStoryRunning } from "./stories";
+// --- end r4/stories
 
 const SHADOW = { textShadow: "0 0 6px #04060b, 0 0 2px #04060b" } as const;
 
@@ -133,6 +136,7 @@ function About({ app, open, setOpen }: { app: App; open: boolean; setOpen: (open
             ({app.data.lod === "hi" ? "full" : "simplified"} detail).
           </p>
           <ReplayIntro app={app} onReplay={() => setOpen(false)} /> {/* r3/tour */}
+          <StoryList app={app} onPick={() => setOpen(false)} /> {/* r4/stories */}
         </div>
       ) : null}
     </>
@@ -228,6 +232,7 @@ export function Hud({ app }: { app: App }) {
   const narrow = useMedia(NARROW);
   const [aboutOpen, setAboutOpen] = useState(false);
   const touring = useTourRunning(app); // r3/tour
+  const storying = useStoryRunning(app); // r4/stories
   // The selection the visitor expanded the panel for: picking another cell (or none) collapses it again.
   const [expandedFor, setExpandedFor] = useState<number | null>(null);
   const expanded = expandedFor === selected;
@@ -244,6 +249,15 @@ export function Hud({ app }: { app: App }) {
     );
   }
   // --- end r3/tour
+  // --- r4/stories: while a story plays, only its title, captions and Skip ---
+  if (storying) {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-10">
+        <StoryOverlay app={app} />
+      </div>
+    );
+  }
+  // --- end r4/stories
 
   return (
     <div className="pointer-events-none absolute inset-0 z-10">
@@ -259,6 +273,7 @@ export function Hud({ app }: { app: App }) {
         <StatusLine app={app} />
         <TimeStatus app={app} /> {/* r3/tour */}
         <TimeControl app={app} /> {/* r3/tour */}
+        <StoriesButton app={app} /> {/* r4/stories */}
       </header>
 
       <About app={app} open={aboutOpen} setOpen={setAboutOpen} />
