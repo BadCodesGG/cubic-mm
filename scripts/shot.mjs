@@ -19,6 +19,8 @@
  * as a visitor sees it (free camera, adaptive quality) and is captured after 6 s.
  * --tour opens `/?tour=1&t=<--t>`: the intro tour on its fixed clock, held at t tour seconds.
  * Every other run marks the tour seen first, so it never covers the view being captured.
+ * --story=<id> opens `/?story=<id>&t=<--t>`: a guided story (basket, axon, layers, hub) on its fixed
+ * clock, held at t story seconds. The story's caption at that moment is printed.
  *
  * Starts `next start` on port 3117, opens `/?shot=hero` in Playwright Chromium at 1600x900,
  * DPR 1, waits for the frame counter and the shot clock to settle, asserts WebGPU (unless
@@ -48,9 +50,11 @@ const wantWebGL = flag("webgl");
 const mobile = flag("mobile");
 const live = flag("live");
 const tour = flag("tour");
-const name = value("name", mobile ? "mobile" : "hero");
-const query = new URLSearchParams(live || tour ? {} : { shot: "hero" });
+const story = value("story", null);
+const name = value("name", mobile ? "mobile" : story ? `story-${story}` : "hero");
+const query = new URLSearchParams(live || tour || story ? {} : { shot: "hero" });
 if (tour) query.set("tour", "1");
+if (story) query.set("story", story);
 if (flag("gpu-timing")) query.set("gpuTiming", "1");
 for (const k of ["quality", "pieces", "budgetMs"]) {
   const v = value(k, null);
@@ -225,6 +229,7 @@ try {
   );
   if (info.viewNow) console.log(`  view ${JSON.stringify(info.viewNow)}, selected ${info.selected}, hash ${info.hashNow || "(none)"}`);
   if (info.cascade) console.log(`  cascade ${JSON.stringify(info.cascade)}`);
+  if (info.story) console.log(`  story ${JSON.stringify(info.story)}`);
   if (info.quality) {
     const q = info.quality;
     console.log(`  quality ${q.tier}/${q.pieces} (${q.instances} instances${q.adapted ? ", adapted down" : ""}), sim ${info.sim?.rateHz.toFixed(2)} Hz/neuron`);

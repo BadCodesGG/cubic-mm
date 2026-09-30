@@ -158,8 +158,51 @@ function spikeNear(u: SceneUniforms, depth: FloatNode, neuron: FloatNode) {
   const x = depth.div(u.spikeNearUm);
   const x2 = x.mul(x);
   const y = depth.div(u.cascadeNearUm);
-  return select(neuron.equal(u.stimNeuron), float(1).div(y.mul(y).add(1)), float(1).div(x2.mul(x2).add(1)));
+  const near = select(neuron.equal(u.stimNeuron), float(1).div(y.mul(y).add(1)), float(1).div(x2.mul(x2).add(1)));
+  // r4/stories: a story's focus cell keeps its light across the whole frame.
+  const f = depth.div(u.focusHazeUm);
+  return select(neuron.equal(u.focusNeuron), float(1).div(f.mul(f).add(1)), near);
 }
+
+// --- r4/stories: inhibition marks ---
+/** How long a cell stays dimmed after an inhibitory pulse lands on it, seconds. */
+export const INHIBIT_FADE_S = 1.5;
+
+/** When an inhibitory pulse last landed on each cell (one texel per neuron, x = simulation time). */
+export interface InhibitionMarks {
+  texture: DataTexture;
+  mark(neuron: number, time: number): void;
+  clear(): void;
+  dispose(): void;
+}
+
+export function createInhibitionMarks(count: number): InhibitionMarks {
+  const texture = makeTexture(count);
+  const data = texture.image.data as Float32Array;
+  const reset = () => {
+    for (let i = 0; i < count; i++) data[i * 4] = NEVER;
+    texture.needsUpdate = true;
+  };
+  reset();
+  return {
+    texture,
+    mark(neuron, time) {
+      if (!(neuron >= 0 && neuron < count) || data[neuron * 4] >= time) return;
+      data[neuron * 4] = time;
+      texture.needsUpdate = true;
+    },
+    clear: reset,
+    dispose: () => texture.dispose(),
+  };
+}
+
+/** 1 the moment an inhibitory pulse lands on `neuron`, back to 0 over INHIBIT_FADE_S; 0 without marks. */
+function inhibitionOf(u: SceneUniforms, marks: InhibitionMarks | undefined, neuron: FloatNode): FloatNode {
+  if (!marks) return float(0);
+  const since = u.time.sub(textureLoad(marks.texture, texel(neuron, 1, 0)).x);
+  return step(0, since).mul(float(1).sub(smoothstep(0, INHIBIT_FADE_S, since)));
+}
+// --- end r4/stories
 
 /** Sum of the spike pulse and its afterglow over one neuron's 8 slots, at path distance `path` µm. */
 function spikeGlow(
@@ -246,6 +289,8 @@ export interface NeuronOptions {
   spikes?: SpikeTimesSource;
   /** Synapses to draw arrival glows at. */
   synapses?: SynapseTable | null;
+  /** r4/stories: cells an inhibitory pulse just landed on, drawn violet and dimmed. */
+  inhibition?: InhibitionMarks;
 }
 
 export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3, opts: NeuronOptions = {}): Neurons {
@@ -366,13 +411,13 @@ export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3, op
   geometry.setAttribute("aTB", new InstancedBufferAttribute(tb, 3));
   geometry.instanceCount = edges;
 
-  const ribbons = new Mesh(geometry, ribbonMaterial(u, textures, slots));
+  const ribbons = new Mesh(geometry, ribbonMaterial(u, textures, slots, opts.inhibition));
   ribbons.frustumCulled = false;
 
   // Somas.
   const somaCount = data.neurons.count;
   const somaPos = new Float32Array(somaCount * 3);
-  const somas = new InstancedMesh(new SphereGeometry(1, 32, 20), somaMaterial(u, textures, slots), somaCount);
+  const somas = new InstancedMesh(new SphereGeometry(1, 32, 20), somaMaterial(u, textures, slots, opts.inhibition), somaCount);
   const m = new Matrix4();
   const v = new Vector3();
   for (let n = 0; n < somaCount; n++) {
@@ -425,11 +470,13 @@ export function createNeurons(data: Dataset, u: SceneUniforms, maxPieces = 3, op
 }
 
 /** Exponential haze with view depth: 1 up close, almost nothing at the far side of the volume. */
-function haze(u: SceneUniforms, depth: FloatNode) {
-  return exp(depth.div(u.hazeDistance).negate());
+function haze(u: SceneUniforms, depth: FloatNode, neuron?: FloatNode) {
+  // r4/stories: a story's focus cell is seen through the haze from further off.
+  const distance = neuron ? select(neuron.equal(u.focusNeuron), u.focusHazeUm, u.hazeDistance) : u.hazeDistance;
+  return exp(depth.div(distance).negate());
 }
 
-function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots): MeshBasicNodeMaterial {
+function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots, marks?: InhibitionMarks): MeshBasicNodeMaterial {
   const aA = attribute("aA", "vec4");
   const aB = attribute("aB", "vec4");
   const aC = attribute("aC", "vec4");
@@ -466,13 +513,20 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots
 
   // Everything that is constant or smooth along one piece is worked out per vertex and
   // interpolated; the fragment stage only shapes the cross-section and the travelling pulse.
-  const h = haze(u, depth);
+  const h = haze(u, depth, neuron);
   const coverage = min(radiusPx.div(drawnPx), 1);
   // Far structure drifts toward the haze tint, near structure keeps its own hue.
   const tint = mix(u.hazeTint, info.rgb, h.pow(0.35));
-  const vBase = varying(tint.mul(info.a).mul(mix(float(1), u.axonGain, isAxon)).mul(u.exposure).mul(u.introFade));
+  // r4/stories: an inhibitory pulse that just landed turns the cell violet and dims it for a moment.
+  const inhibited = inhibitionOf(u, marks, neuron);
+  const shade = mix(tint, u.inhibitColor.mul(0.8), inhibited.mul(0.7)).mul(float(1).sub(inhibited.mul(0.35)));
+  // r4/stories: a story's focus cell is drawn as a clear line however thin or far it is.
+  const focus = select(neuron.equal(u.focusNeuron), float(1), float(0));
+  const vFocus = varying(focus);
+  const brightness = mix(info.a, max(info.a, 0.9), focus);
+  const vBase = varying(shade.mul(brightness).mul(mix(float(1), u.axonGain, isAxon)).mul(u.exposure).mul(u.introFade));
   const vAlpha = varying(
-    u.opacity.mul(coverage).mul(h).mul(mix(float(1), u.axonAlpha, isAxon)).mul(sqrt(info.a)),
+    mix(u.opacity.mul(coverage).mul(h).mul(mix(float(1), u.axonAlpha, isAxon)).mul(sqrt(info.a)), u.opacity.mul(h).mul(0.6), focus),
   );
   // Back-propagating spikes reach into the dendrites weakly and die out with distance.
   const glowGain = mix(exp(path.negate().div(90)).mul(0.35), float(1), isAxon);
@@ -507,7 +561,10 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots
   const dt = u.time.sub(vSpike.add(vDelay));
   const x = dt.div(u.pulseWidth);
   const pulse = exp(x.mul(x).negate());
-  const after = step(0, dt).mul(exp(dt.negate().div(u.afterglow)));
+  // r4/stories: the focus cell keeps a longer trail where its pulse has been.
+  const after = step(0, dt)
+    .mul(exp(dt.negate().div(mix(u.afterglow, u.focusAfterglow, vFocus))))
+    .mul(mix(float(1), u.focusAfterglowGain.div(u.afterglowGain), vFocus));
   const base = vBase;
   // Anything within a few tens of µm of the lens falls away, as if out of the focal plane. Kept
   // per fragment: it changes steeply along the long pieces that pass right by the camera.
@@ -536,7 +593,7 @@ function ribbonMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots
   return material;
 }
 
-function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots): MeshBasicNodeMaterial {
+function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots, marks?: InhibitionMarks): MeshBasicNodeMaterial {
   const neuron = instanceIndex.toFloat();
   const info = varying(textureLoad(tex.info, texel(neuron, 1, 0)));
   const [slotA, slotB] = slots(neuron);
@@ -547,7 +604,8 @@ function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots):
   const facing = abs(normalView.dot(positionView.normalize().negate()));
   // An emissive translucent body: brightness follows the path length through the sphere, so
   // the centre is densest, with a faint membrane rim.
-  const warm = mix(info.rgb, vec3(1.0, 0.85, 0.7), 0.12);
+  const inhibited = varying(inhibitionOf(u, marks, neuron)); // r4/stories
+  const warm = mix(mix(info.rgb, vec3(1.0, 0.85, 0.7), 0.12), u.inhibitColor, inhibited.mul(0.75)).mul(float(1).sub(inhibited.mul(0.3)));
   const body = warm
     .mul(float(0.55).add(info.a.mul(0.45)))
     .mul(pow(facing, 3).mul(0.5).add(pow(float(1).sub(facing), 3).mul(0.12)))
@@ -565,7 +623,7 @@ function somaMaterial(u: SceneUniforms, tex: NeuronTextures, slots: SpikeSlots):
     .mul(cap);
 
   const material = new MeshBasicNodeMaterial();
-  material.colorNode = vec4(body.add(glow).mul(haze(u, depth)).mul(smoothstep(8, 60, depth)), 1);
+  material.colorNode = vec4(body.add(glow).mul(haze(u, depth, neuron)).mul(smoothstep(8, 60, depth)), 1);
   material.transparent = true;
   material.depthWrite = false;
   material.blending = AdditiveBlending;
@@ -647,7 +705,7 @@ function spriteMesh(
   const pxPerUm = u.pixelScale.div(depth);
   // At least 2.5 px so a far point still reads, at most glowCapPx so a near one is not a blob.
   const radius = min(max(radiusUm, float(2.5).div(pxPerUm)), u.glowCapPx.div(pxPerUm));
-  const light = intensity.mul(spikeNear(u, depth, neuron)).mul(haze(u, depth)).mul(smoothstep(4, 45, depth));
+  const light = intensity.mul(spikeNear(u, depth, neuron)).mul(haze(u, depth, neuron)).mul(smoothstep(4, 45, depth));
   const size = select(light.greaterThan(0.002), radius, float(0));
   const corner = positionLocal.xy;
 
@@ -718,6 +776,7 @@ function synapseSprites(
     // A 20 ms rise so it does not pop, then an exponential fade.
     glow = glow.add(smoothstep(-0.02, 0, dt).mul(exp(max(dt, 0).negate().div(u.synapseGlowDecay))));
   }
-  const color = mix(u.spikeColor, vec3(1, 0.92, 0.8), 0.35);
+  // r4/stories: the pulses of the story's inhibitory cell land violet.
+  const color = mix(mix(u.spikeColor, vec3(1, 0.92, 0.8), 0.35), u.inhibitColor, select(aPre.equal(u.inhibitNeuron), float(1), float(0)));
   return spriteMesh(u, geometry, aPre, aSyn.xyz, glow.mul(u.synapseGlowGain), u.synapseGlowUm, color);
 }
