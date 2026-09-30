@@ -50,3 +50,6 @@ pipeline/cache/
 
 # playwright
 test-results/
+
+# launch clips
+brag-output*/
