@@ -13,6 +13,9 @@
  * --allow-software is for CI runners, which have no GPU: WebGPU may fall back to SwiftShader or be
  * absent, so the `isWebGPU === true` and `mode === "gpu"` assertions and the GPU/CPU parity run are
  * skipped, but zero console errors and a running, stimulable simulation are still required.
+ * Software rendering draws a frame every few seconds, so this mode also adds --disable-gpu (a local
+ * run then matches a runner), loads the lightest level at a small viewport, only waits for the render
+ * loop to be running rather than for 30 frames, and gives each interaction longer to land.
  */
 
 import { existsSync } from "node:fs";
@@ -35,9 +38,18 @@ const SOFTWARE = flag("allow-software");
 const GPU_ARGS = ["--enable-unsafe-webgpu", "--enable-features=Vulkan,UseSkiaRenderer", "--use-angle=d3d11", "--ignore-gpu-blocklist"];
 // A GPU-less runner gets no WebGPU flags: the page then takes whatever fallback the browser really offers
 // (a SwiftShader WebGPU adapter stalls the engine for minutes, and is not what a visitor without a GPU gets).
-const WEBGPU_ARGS = SOFTWARE ? ["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] : GPU_ARGS;
+const SOFTWARE_ARGS = ["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist", "--disable-gpu"];
+const WEBGPU_ARGS = SOFTWARE ? SOFTWARE_ARGS : GPU_ARGS;
 // --disable-webgpu is best effort (Chromium ignores switches it does not know); `?webgl=1` is what forces the fallback.
-const WEBGL_ARGS = ["--disable-webgpu", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"];
+const WEBGL_ARGS = ["--disable-webgpu", ...(SOFTWARE ? SOFTWARE_ARGS : ["--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"])];
+// Software rendering: frames the page must have drawn before the checks start, a multiplier on each
+// interaction's timeout, and the lightest render level (the checks are about behaviour, not looks).
+const WARMUP_FRAMES = SOFTWARE ? 3 : 30;
+const SLOW = SOFTWARE ? 6 : 1;
+const LEVEL = SOFTWARE ? "&pieces=1" : "";
+const VIEWPORT = SOFTWARE ? { width: 640, height: 360 } : { width: 1280, height: 720 };
+// With no WebGPU adapter at all, three says so once as it falls back; that is the expected path here.
+const EXPECTED_WARNINGS = SOFTWARE ? ["THREE.WebGPURenderer: WebGPU is not available, running under WebGL2 backend."] : [];
 
 function fail(message) {
   console.error(`FAIL  ${message}`);
@@ -59,7 +71,7 @@ function watch(page) {
   page.on("console", (msg) => {
     const text = msg.text();
     if (msg.type() === "error") problems.push(text);
-    else if (text.includes("THREE.")) problems.push(`warning: ${text}`);
+    else if (text.includes("THREE.") && !EXPECTED_WARNINGS.includes(text)) problems.push(`warning: ${text}`);
   });
   page.on("pageerror", (err) => problems.push(`pageerror: ${err.message}`));
   return problems;
@@ -69,14 +81,14 @@ async function launch(args) {
   return chromium.launch({ headless: true, channel: "chromium", args });
 }
 
-async function openExperience(browser, query, viewport = { width: 1280, height: 720 }) {
+async function openExperience(browser, query, viewport = VIEWPORT) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   // The intro tour plays on a first visit and swallows the input that skips it; these checks drive the free view.
   await context.addInitScript(() => localStorage.setItem("cmm-tour", "seen"));
   const page = await context.newPage();
   const problems = watch(page);
-  await page.goto(`${BASE}/?${query}`, { waitUntil: "load" });
-  await page.waitForFunction(() => window.__cmm && window.__cmm.frame > 30 && window.__cmm.sim, null, { timeout: 180_000 });
+  await page.goto(`${BASE}/?${query}${LEVEL}`, { waitUntil: "load" });
+  await page.waitForFunction((n) => window.__cmm && window.__cmm.frame > n && window.__cmm.sim, WARMUP_FRAMES, { timeout: 180_000 });
   return { context, page, problems };
 }
 
@@ -113,7 +125,7 @@ async function runWebGPU(browser) {
       const [hx, hy] = await page.evaluate(() => window.__cmm.hero.screen);
       await page.mouse.click(hx, hy);
     }
-    await page.waitForFunction(() => window.__cmm.selected >= 0, null, { timeout: 5000 }).catch(() => {});
+    await page.waitForFunction(() => window.__cmm.selected >= 0, null, { timeout: 5000 * SLOW }).catch(() => {});
     const selected = await page.evaluate(() => window.__cmm.selected);
     check("a cell is selected after clicking the canvas", selected >= 0, `neuron ${selected}`);
 
@@ -121,17 +133,17 @@ async function runWebGPU(browser) {
     await page.keyboard.press("Space");
     await page.waitForTimeout(2000);
     await page.evaluate(() => window.__cmm.sim.settle());
-    await page.waitForFunction(() => window.__cmm.sim.stimulated >= 1, null, { timeout: 15_000 }).catch(() => {});
+    await page.waitForFunction(() => window.__cmm.sim.stimulated >= 1, null, { timeout: 15_000 * SLOW }).catch(() => {});
     const after = await page.evaluate(() => ({ stimulated: window.__cmm.sim.stimulated, spikes: window.__cmm.sim.spikes }));
     check("Space: __cmm.sim.stimulated >= 1", after.stimulated >= 1, String(after.stimulated));
     check("__cmm.sim.spikes increased", after.spikes > before, `${before} -> ${after.spikes}`);
 
     await page.keyboard.press("r");
     const ride = await page
-      .waitForFunction(() => window.__cmm.ride !== "idle" && window.__cmm.ride, null, { timeout: 5000 })
+      .waitForFunction(() => window.__cmm.ride !== "idle" && window.__cmm.ride, null, { timeout: 5000 * SLOW })
       .then((h) => h.jsonValue())
       .catch(() => "idle");
-    check('R: __cmm.ride leaves "idle" within 5 s', ride !== "idle", String(ride));
+    check(`R: __cmm.ride leaves "idle" within ${5 * SLOW} s`, ride !== "idle", String(ride));
 
     check("no console errors or THREE warnings", problems.length === 0, problems.join(" | "));
   } finally {
@@ -163,7 +175,7 @@ async function runWebGL(browser) {
     const info = await page.evaluate(() => ({ isWebGPU: window.__cmm.isWebGPU, mode: window.__cmm.sim.mode }));
     check("__cmm.isWebGPU === false", info.isWebGPU === false, String(info.isWebGPU));
     check('__cmm.sim.mode === "cpu"', info.mode === "cpu", info.mode);
-    await page.waitForFunction(() => window.__cmm.sim.spikes > 0, null, { timeout: 30_000 }).catch(() => {});
+    await page.waitForFunction(() => window.__cmm.sim.spikes > 0, null, { timeout: 30_000 * SLOW }).catch(() => {});
     const spikes = await page.evaluate(() => window.__cmm.sim.spikes);
     check("the CPU simulation spiked", spikes > 0, `${spikes} spikes`);
     check("no console errors or THREE warnings", problems.length === 0, problems.join(" | "));
