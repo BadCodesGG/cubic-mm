@@ -25,7 +25,7 @@ function Row({ label, stacked, children }: { label: string; stacked?: boolean; c
   );
 }
 
-function Kbd({ children }: { children: ReactNode }) {
+export function Kbd({ children }: { children: ReactNode }) { // r4/graph: exported for the wiring toggle
   return (
     <kbd className="ml-1.5 rounded-[3px] border border-slate-500/40 px-1 font-mono text-[11px] leading-4 text-slate-400 pointer-coarse:hidden">
       {children}

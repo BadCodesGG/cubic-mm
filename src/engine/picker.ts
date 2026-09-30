@@ -61,6 +61,9 @@ const INTERACTIVE = "button, a, input, select, textarea, summary, [role='button'
 
 export class Picker {
   private selected = -1;
+  // --- r4/graph: the soma under the pointer, so `hover` fires when it changes and not on every move ---
+  private hovered = -1;
+  // --- end r4/graph ---
   private down: { x: number; y: number } | null = null;
   private readonly offs: (() => void)[] = [];
 
@@ -73,6 +76,7 @@ export class Picker {
     this.offs.push(bus.on("select", (e) => (this.selected = e.neuron)));
     canvas.addEventListener("pointerdown", this.onPointerDown);
     canvas.addEventListener("pointermove", this.onPointerMove);
+    canvas.addEventListener("pointerleave", this.onPointerLeave); // r4/graph
     canvas.addEventListener("click", this.onClick);
     canvas.addEventListener("dblclick", this.onDoubleClick);
     window.addEventListener("keydown", this.onKeyDown);
@@ -95,6 +99,7 @@ export class Picker {
     for (const off of this.offs) off();
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
     this.canvas.removeEventListener("pointermove", this.onPointerMove);
+    this.canvas.removeEventListener("pointerleave", this.onPointerLeave); // r4/graph
     this.canvas.removeEventListener("click", this.onClick);
     this.canvas.removeEventListener("dblclick", this.onDoubleClick);
     window.removeEventListener("keydown", this.onKeyDown);
@@ -107,9 +112,30 @@ export class Picker {
 
   /** Hover feedback: a pointer cursor over a pickable soma. */
   private onPointerMove = (e: PointerEvent) => {
-    if (e.buttons !== 0 || document.pointerLockElement === this.canvas || e.pointerType !== "mouse") return;
-    this.canvas.style.cursor = this.pickAt(e) >= 0 ? "pointer" : "";
+    if (e.pointerType !== "mouse") return;
+    // --- r4/graph: a drag or a captured mouse is looking around, not pointing at a cell ---
+    if (e.buttons !== 0 || document.pointerLockElement === this.canvas) {
+      this.setHover(-1);
+      return;
+    }
+    // --- end r4/graph ---
+    const hit = this.pickAt(e);
+    this.canvas.style.cursor = hit >= 0 ? "pointer" : "";
+    this.setHover(hit); // r4/graph
   };
+
+  // --- r4/graph ---
+  private onPointerLeave = () => {
+    this.canvas.style.cursor = "";
+    this.setHover(-1);
+  };
+
+  private setHover(neuron: number): void {
+    if (neuron === this.hovered) return;
+    this.hovered = neuron;
+    this.bus.emit("hover", { neuron });
+  }
+  // --- end r4/graph ---
 
   private onClick = (e: MouseEvent) => {
     const locked = document.pointerLockElement === this.canvas;

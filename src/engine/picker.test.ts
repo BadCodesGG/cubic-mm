@@ -133,6 +133,45 @@ describe("Picker", () => {
     expect(selects).toEqual([0]);
   });
 
+  describe("hover", () => {
+    const hovers: number[] = [];
+    const move = (x: number, y: number, extra: Record<string, unknown> = {}) =>
+      canvasHandlers.get("pointermove")!({ clientX: x, clientY: y, buttons: 0, pointerType: "mouse", ...extra });
+    beforeEach(() => {
+      hovers.length = 0;
+      bus.on("hover", (e) => hovers.push(e.neuron));
+    });
+
+    it("fires when the soma under the pointer changes, not on every move", () => {
+      move(5, 5); // nothing under it and nothing before: silent
+      move(W / 2, H / 2);
+      move(W / 2 + 3, H / 2 + 2);
+      move(W / 2 + 300, H / 2 + 300);
+      move(W / 2 + 310, H / 2 + 300);
+      expect(hovers).toEqual([0, -1]);
+      expect(canvas.style.cursor).toBe("");
+    });
+
+    it("fires -1 when the pointer leaves the canvas", () => {
+      move(W / 2, H / 2);
+      canvasHandlers.get("pointerleave")!({});
+      canvasHandlers.get("pointerleave")!({});
+      expect(hovers).toEqual([0, -1]);
+    });
+
+    it("is not a hover while dragging or with the mouse captured, and not on touch", () => {
+      move(W / 2, H / 2);
+      move(W / 2, H / 2, { buttons: 1 });
+      expect(hovers).toEqual([0, -1]);
+      move(W / 2, H / 2, { pointerType: "touch" });
+      expect(hovers).toEqual([0, -1]);
+      move(W / 2, H / 2);
+      vi.stubGlobal("document", { pointerLockElement: canvas });
+      move(W / 2, H / 2);
+      expect(hovers).toEqual([0, -1, 0, -1]);
+    });
+  });
+
   it("double-click stimulates the neuron under the cursor", () => {
     canvasHandlers.get("dblclick")!({ clientX: W / 2, clientY: H / 2 });
     expect(selects).toEqual([0]);
