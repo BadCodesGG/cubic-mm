@@ -51,6 +51,10 @@ import { LinkSync, decodeView, lookAngles, lookDirection, type ViewState } from 
 import { CascadeTracker } from "./cascade";
 import { createCascadeLines } from "./scene/cascade";
 // --- end r3/cascade ---
+// --- r4/graph: the connectome as a graph (hover and pinned wiring) ---
+import { PREVIEW_S, WiringState, buildPartnerIndex, type PartnerIndex } from "./partners";
+import { createPartnerGraph } from "./scene/partners";
+// --- end r4/graph ---
 
 export interface AppOptions {
   /** "hero" selects the scripted, reproducible camera. */
@@ -117,6 +121,12 @@ export interface App {
   /** What the last stimulus set off: hop counts, edges and a timeline. */
   cascade: CascadeTracker;
   // --- end r3/cascade ---
+  // --- r4/graph ---
+  /** Who each cell synapses onto and receives from; null when the dataset has no synapse table. */
+  partners: PartnerIndex | null;
+  /** Which cell's graph is pinned (`pinned`), or -1. */
+  wiring: WiringState;
+  // --- end r4/graph ---
 }
 
 export interface CmmDebug {
@@ -173,6 +183,21 @@ export interface CmmDebug {
   /** Selects and stimulates a neuron, as a click and Space would. */
   stimulate?: (neuron: number) => void;
   // --- end r3/cascade ---
+  // --- r4/graph: for scripts/shot.mjs --hover and --partners, and for checks ---
+  wiring?: {
+    /** ms the partner index took to build. */
+    buildMs: number;
+    /** Most partners (outputs plus inputs) of any cell. */
+    maxPartners: number;
+    /** Lines drawn this frame. */
+    lines(): number;
+    /** Emits `hover`, as the pointer over a soma does. */
+    hover(neuron: number): void;
+    /** Selects the cell and pins (or unpins) its graph. */
+    pin(neuron: number, show?: boolean): void;
+    state(): { hover: number; pinned: number };
+  };
+  // --- end r4/graph ---
 }
 
 declare global {
@@ -326,6 +351,18 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
   const cascadeLines = createCascadeLines(data, cascade, u);
   scene.add(cascadeLines.object);
   // --- end r3/cascade ---
+  // --- r4/graph: the index is built once, here; hover, pin and preview are read from the bus ---
+  const indexStart = performance.now();
+  const partnerIndex = data.synapses ? buildPartnerIndex(data.synapses, data.neurons.inhibitory) : null;
+  const partnerBuildMs = performance.now() - indexStart;
+  const wiring = new WiringState(bus, data.neurons.count);
+  const partnerGraph = partnerIndex ? createPartnerGraph(data, partnerIndex, wiring, u) : null;
+  if (partnerGraph) scene.add(partnerGraph.group);
+  const onWiringKey = (e: KeyboardEvent) => {
+    if (!scripted) wiring.onKey(e, bus);
+  };
+  window.addEventListener("keydown", onWiringKey);
+  // --- end r4/graph ---
   const buildNeurons = (d: Dataset, pieces: Pieces): Neurons => {
     const built = createNeurons(d, u, pieces, { spikes: sim.spikeTimesSource, synapses: sim.synapses });
     scene.add(built.ribbons, built.somas, built.pulses);
@@ -463,6 +500,19 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       bus.emit("stimulate", { neuron });
     },
     // --- end r3/cascade ---
+    // --- r4/graph ---
+    wiring: {
+      buildMs: partnerBuildMs,
+      maxPartners: partnerIndex?.maxPartners ?? 0,
+      lines: () => partnerGraph?.lineCount ?? 0,
+      hover: (neuron) => bus.emit("hover", { neuron }),
+      pin: (neuron, show = true) => {
+        bus.emit("select", { neuron });
+        bus.emit("partners", { neuron, show });
+      },
+      state: () => ({ hover: wiring.shown().hover, pinned: wiring.pinned }),
+    },
+    // --- end r4/graph ---
   };
   window.__cmm = debug;
 
@@ -549,7 +599,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     jumpAway.copy(camera.position).sub(jumpSoma).setY(0);
     if (jumpAway.lengthSq() < 1e-6) jumpAway.copy(hero.anchor.axis).negate().setY(0);
     jumpAway.normalize();
-    flight.start(poseAround(jumpSoma, jumpAway, 120, jumpPose), undefined, () => bus.emit("select", { neuron }));
+    flight.start(poseAround(jumpSoma, jumpAway, 120, jumpPose), undefined, () => {
+      bus.emit("select", { neuron });
+      wiring.preview(neuron, PREVIEW_S); // r4/graph: the search reward, a graph for a few seconds
+    });
   });
   // A ride takes the camera from a flight in progress.
   bus.on("ride", () => flight.cancel());
@@ -685,6 +738,10 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     audio.update(dt); // r1-audio
     u.time.value = simTime;
     cascadeLines.update(simTime); // r3/cascade
+    // --- r4/graph: real seconds, so the fades and the preview timer ignore the time scale and a paused sim ---
+    wiring.tick(dt);
+    partnerGraph?.update(dt);
+    // --- end r4/graph ---
     debug.hero.distanceUm = camera.position.distanceTo(hero.anchor.soma);
     const ndc = heroNdc.copy(hero.anchor.soma).project(camera);
     debug.hero.screen = [((ndc.x + 1) / 2) * canvas.clientWidth, ((1 - ndc.y) / 2) * canvas.clientHeight];
@@ -792,6 +849,8 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
     },
     // --- end r3/links ---
     cascade, // r3/cascade
+    partners: partnerIndex, // r4/graph
+    wiring, // r4/graph
     dispose() {
       // --- r1/nav ---
       ride.dispose();
@@ -817,6 +876,11 @@ export async function startApp(canvas: HTMLCanvasElement, opts: AppOptions = {})
       cascade.dispose();
       cascadeLines.dispose();
       // --- end r3/cascade ---
+      // --- r4/graph ---
+      window.removeEventListener("keydown", onWiringKey);
+      wiring.dispose();
+      partnerGraph?.dispose();
+      // --- end r4/graph ---
       // --- sim (r1/sim) ---
       sim.dispose();
       bus.clear();

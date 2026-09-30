@@ -10,6 +10,10 @@
  * --type=<text> (with --live) presses "/" and types into the cell search before the capture; --enter
  * then presses Enter and waits for the flight. The camera view and the address-bar hash are printed.
  *
+ * --hover=N|hero puts the pointer over cell N's soma (hero: a real mouse move onto the hero's soma, through the
+ * picker) and waits for the wiring lines to fade in; --partners=N|hero selects that cell and pins its graph
+ * (the "Show wiring" toggle), so the panel shows the partner counts. Both work with the scripted hero shot.
+ *
  * --select starts with the hero selected; --stimulate=N (with --live) selects and stimulates neuron N, then waits --after=S s (default 4), or with --until-hop1=N until N cells have fired.
  * --quality / --pieces pin the render tier (default: the scripted shot's own, hi/2 on WebGPU).
  * --budgetMs lowers the adaptive frame budget (with --live), to watch the tier step down.
@@ -181,7 +185,27 @@ async function attempt(strategy) {
         await page.waitForTimeout(Number(value("after", 4)) * 1000);
       }
     }
+    const heroNeuron = () => page.evaluate(() => window.__cmm.hero.neuron);
+    const hoverArg = value("hover", null);
+    if (hoverArg === "hero") {
+      const [x, y] = await page.evaluate(() => window.__cmm.hero.screen);
+      await page.mouse.move(x - 60, y - 40);
+      await page.mouse.move(x, y, { steps: 5 });
+    } else if (hoverArg !== null) {
+      await page.evaluate((n) => window.__cmm.wiring.hover(n), Number(hoverArg));
+    }
+    const partnersArg = value("partners", null);
+    if (partnersArg !== null) {
+      const n = partnersArg === "hero" ? await heroNeuron() : Number(partnersArg);
+      await page.evaluate((k) => window.__cmm.wiring.pin(k), n);
+    }
+    // The graph fades in over 150 ms; give it, and the panel, time to settle.
+    if (hoverArg !== null || partnersArg !== null) await page.waitForTimeout(900);
     const info = await page.evaluate(() => ({ ...window.__cmm }));
+    info.wiringNow = await page.evaluate(() => {
+      const w = window.__cmm.wiring;
+      return w ? { buildMs: w.buildMs, maxPartners: w.maxPartners, lines: w.lines(), ...w.state() } : null;
+    });
     Object.assign(info, { viewNow, hashNow });
     info.cascade = await page.evaluate(() => window.__cmm.cascade?.() ?? null);
     if (mobile) info.layout = await page.evaluate(layoutReport);
@@ -224,6 +248,7 @@ try {
       `hero neuron ${info.hero.neuron} at ${info.hero.distanceUm.toFixed(0)} µm, on screen at ${info.hero.screen.map((v) => v.toFixed(0)).join(",")}`,
   );
   if (info.viewNow) console.log(`  view ${JSON.stringify(info.viewNow)}, selected ${info.selected}, hash ${info.hashNow || "(none)"}`);
+  if (info.wiringNow) console.log(`  wiring ${JSON.stringify(info.wiringNow)}`);
   if (info.cascade) console.log(`  cascade ${JSON.stringify(info.cascade)}`);
   if (info.quality) {
     const q = info.quality;
