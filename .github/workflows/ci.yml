@@ -46,7 +46,7 @@ jobs:
       # the Playwright dependency does. The install still runs: it is a no-op for the binary on a
       # cache hit, and `--with-deps` puts the system packages in place either way.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
