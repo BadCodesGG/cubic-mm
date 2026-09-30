@@ -23,8 +23,10 @@ jobs:
 
       - run: npm ci
 
+      # LayoutProps is a global Next generates into .next/types; a fresh checkout has
+      # no .next until typegen (or a build) writes it, so tsc alone fails here while passing locally.
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint
@@ -44,7 +46,7 @@ jobs:
       # the Playwright dependency does. The install still runs: it is a no-op for the binary on a
       # cache hit, and `--with-deps` puts the system packages in place either way.
       - name: Cache Playwright browsers
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}

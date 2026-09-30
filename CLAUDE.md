@@ -17,6 +17,7 @@ cell, watch the signal travel down its axon, and ride a spike. WebGPU first, wit
 npm run dev            # Dev server at http://localhost:3000
 npm run build          # Production build (the real gate; dev mode hides prerender problems)
 npm run lint           # ESLint (Next core-web-vitals + TypeScript)
+npm run typecheck      # next typegen, then tsc --noEmit (bare tsc fails on a fresh checkout)
 npm run test           # Vitest: format round-trips, data integrity of public/data, the CPU sim
 npm run test:smoke     # Boots the built site, drives it in Chromium with WebGPU on and off
 npm run data:check     # Re-packs from pipeline/cache and fails if public/data is stale
@@ -24,7 +25,7 @@ npm run data:check     # Re-packs from pipeline/cache and fails if public/data i
 .venv/Scripts/python pipeline/pack.py                # Write public/data from the cache
 ```
 
-Type-check with `npx tsc --noEmit`. Python is only ever the venv at `.venv/Scripts/python`.
+Type-check with `npm run typecheck`, never bare `npx tsc --noEmit`: it passes locally only because an old `.next/types` is lying around, and fails in CI. Python is only ever the venv at `.venv/Scripts/python`.
 
 ## Architecture
 

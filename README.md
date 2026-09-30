@@ -61,7 +61,7 @@ npm run dev            # http://localhost:3000
 Checks:
 
 ```bash
-npx tsc --noEmit       # types
+npm run typecheck      # generates the Next route types, then tsc --noEmit
 npm run lint           # ESLint
 npm run test           # Vitest: data format, data integrity, the CPU model, camera and HUD logic
 npm run build          # production build
