@@ -5,7 +5,7 @@
 
 **Live: [cubic-mm.vercel.app](https://cubic-mm.vercel.app)**
 
-![Ribbons of neurons filling a dark volume, one axon carrying a bright pulse](public/hero-still.jpg)
+https://github.com/user-attachments/assets/acf70ec3-baeb-4dc6-8f7a-cff1a03fdec7
 
 The data is the [MICrONS](https://www.microns-explorer.org/cortical-mm3) minnie65 volume: a cubic millimetre of mouse visual cortex, the only piece of brain ever mapped down to every synapse. The proofread skeletons of 1,711 of its neurons are rendered as glowing ribbons at true scale, and a leaky integrate-and-fire model runs over 156,882 of their real synapses. Click a cell and stimulate it, watch the signal travel down its actual axon, see which cells it fires, and ride the spike into the next one. Every spike is a synthesised sound placed in 3D.
 
