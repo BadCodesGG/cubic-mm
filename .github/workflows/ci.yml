@@ -23,8 +23,10 @@ jobs:
 
       - run: npm ci
 
+      # LayoutProps is a global Next generates into .next/types; a fresh checkout has
+      # no .next until typegen (or a build) writes it, so tsc alone fails here while passing locally.
       - name: Type check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint
