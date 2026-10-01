@@ -3,13 +3,13 @@
 **Walk through a real cubic millimetre of mouse brain.**
 1,711 real neurons, 156,882 real synapses, and a live spiking simulation you can set off, running on WebGPU in the browser.
 
-**Live: [cubic-mm.vercel.app](https://cubic-mm.vercel.app)**
+**Live: [cubic.badcodes.dev](https://cubic.badcodes.dev)**
 
 https://github.com/user-attachments/assets/acf70ec3-baeb-4dc6-8f7a-cff1a03fdec7
 
 The data is the [MICrONS](https://www.microns-explorer.org/cortical-mm3) minnie65 volume: a cubic millimetre of mouse visual cortex, the only piece of brain ever mapped down to every synapse. The proofread skeletons of 1,711 of its neurons are rendered as glowing ribbons at true scale, and a leaky integrate-and-fire model runs over 156,882 of their real synapses. Click a cell and stimulate it, watch the signal travel down its actual axon, see which cells it fires, and ride the spike into the next one. Every spike is a synthesised sound placed in 3D.
 
-The wiring is measured. The dynamics on it are a toy, and the site's [about page](https://cubic-mm.vercel.app/about) says exactly which is which.
+The wiring is measured. The dynamics on it are a toy, and the site's [about page](https://cubic.badcodes.dev/about) says exactly which is which.
 
 ## What you can do
 
