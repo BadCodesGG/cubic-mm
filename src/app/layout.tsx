@@ -24,7 +24,6 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     title: SITE_NAME,
     description: SITE_DESCRIPTION,
-    url: "/",
     images: [OG_IMAGE],
   },
   twitter: {
