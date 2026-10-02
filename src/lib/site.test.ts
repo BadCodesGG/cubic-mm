@@ -4,7 +4,7 @@ vi.mock("next/font/google", () => ({ Geist: () => ({ variable: "" }), Geist_Mono
 
 import { metadata as layoutMetadata } from "@/app/layout";
 import { metadata as aboutMetadata } from "@/app/about/page";
-import { OG_IMAGE, pageMetadata, SITE_URL } from "@/lib/site";
+import { OG_IMAGE, pageMetadata, shareTitle, SITE_NAME, SITE_URL } from "@/lib/site";
 
 type Images = unknown[] | undefined;
 const ogImages = (m: { openGraph?: unknown }) => (m.openGraph as { images?: Images }).images;
@@ -23,8 +23,17 @@ describe("share image", () => {
     const m = pageMetadata({ title: "T", description: "D", path: "/x" });
     expect(ogImages(m)).toContain(OG_IMAGE);
     expect(twitterImages(m)).toContain(OG_IMAGE.url);
-    expect(m.openGraph).toMatchObject({ title: "T", description: "D", url: "/x" });
+    expect(m.openGraph).toMatchObject({ title: "T | One Cubic Millimetre", description: "D", url: "/x" });
     expect(m.alternates?.canonical).toBe("/x");
+  });
+  it("a card's title is the page's <title>: the root page as written, every other route with the suffix", () => {
+    expect(shareTitle("T", "/")).toBe("T");
+    expect(shareTitle("T", "/x")).toBe(`T | ${SITE_NAME}`);
+  });
+
+  it("/about's card says which site it is, as its <title> does", () => {
+    expect(aboutMetadata.openGraph).toMatchObject({ title: "About | One Cubic Millimetre", url: "/about" });
+    expect(aboutMetadata.twitter).toMatchObject({ title: "About | One Cubic Millimetre" });
   });
 
   it.each([
