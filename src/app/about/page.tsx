@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { datasetFacts } from "@/lib/dataset-facts";
-import { OG_IMAGE, SITE_NAME } from "@/lib/site";
+import { pageMetadata, SITE_NAME } from "@/lib/site";
 import { Controls, HowItWasBuilt, TheData, TheSimulation, WhatYouAreLookingAt } from "@/components/about/sections";
 import { LINK } from "@/components/about/section";
 
@@ -9,14 +9,7 @@ const int = new Intl.NumberFormat("en-US");
 const facts = datasetFacts();
 const description = `${int.format(facts.neuronCount)} real neurons and ${int.format(facts.synapseCount)} real synapses from the MICrONS cubic millimetre of mouse cortex, with a toy spiking simulation on the true wiring.`;
 
-export const metadata: Metadata = {
-  title: "About",
-  description,
-  alternates: { canonical: "/about" },
-  // Restated on purpose: a page-level openGraph block drops the file-convention image (see lib/site.ts).
-  openGraph: { title: `About | ${SITE_NAME}`, description, url: "/about", images: [OG_IMAGE] },
-  twitter: { card: "summary_large_image", title: `About | ${SITE_NAME}`, description, images: [OG_IMAGE.url] },
-};
+export const metadata: Metadata = pageMetadata({ title: "About", description, path: "/about" });
 
 export default function About() {
   return (

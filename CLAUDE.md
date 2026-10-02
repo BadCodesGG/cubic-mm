@@ -51,3 +51,8 @@ Type-check with `npm run typecheck`, never bare `npx tsc --noEmit`: it passes lo
   `manifest.boundsUm`; path distance is quarter-µm u16; radius is nm u16.
 - **Credits are not optional.** The MICrONS data is CC BY 4.0; the manifest carries the citation
   and `/about` must show it.
+- **Any route that sets metadata must go through `pageMetadata()` in `src/lib/site.ts`.** The share
+  image is the static `public/og.jpg` (there is no opengraph-image file convention), and Next
+  replaces the layout's `openGraph` and `twitter` wholesale when a route declares its own, so a
+  route that skips the helper ships a card with no picture. `SITE_URL` is the production domain
+  on purpose; do not point it at localhost or `VERCEL_URL`.

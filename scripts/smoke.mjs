@@ -6,7 +6,7 @@
  * Boots `next start` (it refuses to run without a build: dev mode hides prerender problems) and
  * drives it in Playwright Chromium, twice:
  *   a. WebGPU on: the GPU simulation runs, a click + Space stimulates a cell, R starts a ride;
- *      /about carries the citation and the synapse count; the social image is a PNG.
+ *      /about carries the citation and the synapse count; the social image is a JPEG.
  *   b. WebGPU off (`?webgl=1`): the WebGL2 lite mode runs the CPU simulation.
  * then runs scripts/parity.mjs on the same port. Prints a line per assertion, exits 1 on the first failure.
  *
@@ -162,10 +162,10 @@ async function runWebGPU(browser) {
   check("/about restates og:image", !!ogMatch, ogMatch?.[1] ?? "missing");
   const home = await html("/");
   check("/ has og:image", /<meta property="og:image" content="/.test(home.text));
-  // metadataBase is the deployment origin, not this server, so fetch the path from here.
+  // metadataBase is the production origin, not this server, so fetch the path from here.
   const og = await fetch(`${BASE}${new URL(ogMatch[1]).pathname}`);
   const type = og.headers.get("content-type") ?? "";
-  check("OG image returns 200 image/png", og.status === 200 && type.startsWith("image/png"), `${og.status} ${type}`);
+  check("OG image returns 200 image/jpeg", og.status === 200 && type.startsWith("image/jpeg"), `${og.status} ${type}`);
 }
 
 async function runWebGL(browser) {

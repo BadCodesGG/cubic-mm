@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
+import { OG_IMAGE, SITE_DESCRIPTION, SITE_NAME, SITE_URL } from "@/lib/site";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,14 +13,26 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-// No openGraph.images or twitter.images here: src/app/opengraph-image.tsx supplies them for every
-// route that does not declare its own openGraph block (and /about restates them).
+// openGraph and twitter list OG_IMAGE explicitly: there is no opengraph-image file convention, and a
+// route that declares its own openGraph block replaces these wholesale (use pageMetadata()).
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: { default: SITE_NAME, template: `%s | ${SITE_NAME}` },
   description: SITE_DESCRIPTION,
-  openGraph: { type: "website", siteName: SITE_NAME, title: SITE_NAME, description: SITE_DESCRIPTION },
-  twitter: { card: "summary_large_image", title: SITE_NAME, description: SITE_DESCRIPTION },
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    url: "/",
+    images: [OG_IMAGE],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    images: [OG_IMAGE.url],
+  },
 };
 
 export const viewport: Viewport = {

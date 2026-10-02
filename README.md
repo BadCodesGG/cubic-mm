@@ -68,7 +68,7 @@ npm run build          # production build
 npm run test:smoke     # boots the build, drives it in Chromium with WebGPU on and off, runs parity
 ```
 
-The smoke test needs a build first and Playwright's Chromium (`npx playwright install chromium`). On a machine without a GPU, `npm run test:smoke -- --allow-software`. `NEXT_PUBLIC_SITE_URL` sets the origin used in the social cards.
+The smoke test needs a build first and Playwright's Chromium (`npx playwright install chromium`). On a machine without a GPU, `npm run test:smoke -- --allow-software`. The social card is the static `public/og.jpg`; `NEXT_PUBLIC_SITE_URL` overrides its origin (default `https://cubic.badcodes.dev`).
 
 ### Regenerating the data
 
