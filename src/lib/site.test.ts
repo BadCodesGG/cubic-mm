@@ -4,6 +4,7 @@ vi.mock("next/font/google", () => ({ Geist: () => ({ variable: "" }), Geist_Mono
 
 import { metadata as layoutMetadata } from "@/app/layout";
 import { metadata as aboutMetadata } from "@/app/about/page";
+import { metadata as homeMetadata } from "@/app/page";
 import { OG_IMAGE, pageMetadata, shareTitle, SITE_NAME, SITE_URL } from "@/lib/site";
 
 type Images = unknown[] | undefined;
@@ -38,13 +39,15 @@ describe("share image", () => {
 
   it.each([
     ["layout", layoutMetadata],
+    ["/", homeMetadata],
     ["/about", aboutMetadata],
   ])("%s lists the og image for openGraph and twitter", (_name, m) => {
     expect(ogImages(m)).toContain(OG_IMAGE);
     expect(twitterImages(m)).toContain(OG_IMAGE.url);
   });
 
-  it("/about has its own og:url", () => {
+  it("/ and /about each have their own og:url", () => {
+    expect(homeMetadata.openGraph).toMatchObject({ title: SITE_NAME, url: "/" });
     expect((aboutMetadata.openGraph as { url?: string }).url).toBe("/about");
   });
 });
