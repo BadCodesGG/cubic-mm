@@ -2,6 +2,15 @@
   "name": "cubic-mm",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BadCodesGG/cubic-mm"
+  },
+  "homepage": "https://cubic.badcodes.dev",
+  "engines": {
+    "node": "22.x || 24.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -20,7 +29,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.186.0",

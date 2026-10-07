@@ -10,7 +10,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Worktrees under .claude/ are other checkouts of this repo, each linted from its own root.
+    // Local tool state, including other checkouts of this repo; not part of the project.
     ".claude/**",
     ".venv/**",
   ]),

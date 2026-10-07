@@ -45,11 +45,12 @@ next-env.d.ts
 __pycache__/
 pipeline/cache/
 
-# local worktrees, plans and screenshots
+# local tool state and screenshots
 .claude/
+.shots/
+/AGENTS.md
+/CLAUDE.md
 
 # playwright
 test-results/
 
-# launch clips
-brag-output*/

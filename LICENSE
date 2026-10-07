@@ -19,7 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-The neuron skeletons, cell types and synapses in public/data/ are not covered
-by this licence. They are derived from the MICrONS minnie65 release and are
-licensed CC BY 4.0 by the MICrONS Consortium; see README.md for the citation.

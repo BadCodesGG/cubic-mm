@@ -28,7 +28,7 @@
  *
  * Starts `next start` on port 3117, opens `/?shot=hero` in Playwright Chromium at 1600x900,
  * DPR 1, waits for the frame counter and the shot clock to settle, asserts WebGPU (unless
- * --webgl) and zero console errors, and writes `.claude/shots/<name>-<n>.png` with the next
+ * --webgl) and zero console errors, and writes `.shots/<name>-<n>.png` with the next
  * free n. Several launch strategies are tried in order, since WebGPU availability in
  * automated Chromium depends on headless mode and GPU flags; the one that worked is printed.
  */
@@ -48,7 +48,7 @@ const value = (name, fallback) => {
 // --port lets parallel worktrees each take their own.
 const PORT = Number(value("port", 3117));
 const BASE = `http://localhost:${PORT}`;
-const SHOTS = path.join(ROOT, ".claude", "shots");
+const SHOTS = path.join(ROOT, ".shots");
 
 const wantWebGL = flag("webgl");
 const mobile = flag("mobile");

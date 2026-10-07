@@ -1,0 +1,2 @@
+# pipeline/pack.py writes LF and its --check compares bytes, so the packed JSON stays LF on every checkout.
+public/data/*.json text eol=lf

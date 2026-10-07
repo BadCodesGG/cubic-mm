@@ -6,7 +6,7 @@ export default defineConfig({
     alias: { "@": path.resolve(import.meta.dirname, "./src") },
   },
   test: {
-    // Worktrees under .claude/ are other checkouts of this repo; their tests are not ours.
+    // Local tool state, including other checkouts of this repo; their tests are not ours.
     exclude: [...configDefaults.exclude, ".claude/**"],
   },
 });

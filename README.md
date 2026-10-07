@@ -51,9 +51,24 @@ scripts/             Smoke test, GPU/CPU parity check, reproducible screenshots.
 
 **Quality tiers.** The app starts at the highest detail the device is likely to hold and steps down (fewer curve pieces, then the coarser skeleton tier) if the measured frame time says so, without mistaking a 30 Hz display for a slow GPU. Browsers without WebGPU get the WebGL2 renderer and the worker simulation.
 
+### Things to know before changing the code
+
+- Never use `ShaderMaterial`, `onBeforeCompile` or `EffectComposer`: they do not run on the WebGPU backend. Materials are TSL node materials, and post-processing is a `RenderPipeline` with TSL display nodes from `three/examples/jsm/tsl/display/`.
+- Gate compute on `renderer.backend.isWebGPUBackend`. The WebGL2 fallback compiles TSL to GLSL but has no real compute, so lite mode runs the same simulation in a Web Worker (`src/engine/sim/model.ts`).
+- Do not construct `THREE.Clock`. three r186 deprecates it with a console warning, and the smoke test fails on any `THREE.` warning.
+- `src/engine/format.ts` is the binary data contract and `pipeline/pack.py` mirrors it byte for byte. `format.test.ts` round-trips the TypeScript encoders and `data-integrity.test.ts` checks the committed files: change one side, change the other and run both.
+- Data is in µm with y as depth (the pia at low y). Positions are u16 quantised against `manifest.boundsUm`, path distance is quarter-µm u16 and radius is nm u16.
+- The MICrONS credit is required by its licence: the manifest carries the citation and `/about` must show it.
+- Any route that sets metadata goes through `pageMetadata()` in `src/lib/site.ts`. A route that declares its own `openGraph` or `twitter` replaces the layout's wholesale, so its card loses the picture; a route that sets only `title` unfurls with the home page's title and URL. The production origin must be a literal domain, never `VERCEL_URL` or localhost, because a relative or deployment URL makes Slack and Facebook drop the image.
+- Type-check with `npm run typecheck`, not bare `tsc`: it generates the route types first, and bare `tsc` fails on a fresh checkout.
+
 ## Running it
 
+Node 22 or 24.
+
 ```bash
+git clone https://github.com/BadCodesGG/cubic-mm.git
+cd cubic-mm
 npm install
 npm run dev            # http://localhost:3000
 ```
@@ -89,5 +104,7 @@ The neuron skeletons, cell types and synapses come from the MICrONS Consortium a
 > The MICrONS Consortium. Functional connectomics spanning multiple areas of mouse visual cortex. *Nature* 640, 435-447 (2025). https://doi.org/10.1038/s41586-025-08790-w
 
 The code is MIT, see [LICENSE](LICENSE).
+
+Files that are not covered by the MIT licence, and the terms for the BadCodes name and logo, are listed in [NOTICE](NOTICE).
 
 Built by [BadCodes](https://badcodes.dev).

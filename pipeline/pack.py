@@ -630,10 +630,14 @@ def pack_synapses(rows, results, order, lo, hi, log) -> tuple[bytes, dict]:
     return data, {"file": "synapses.bin", "count": count}
 
 
+# Hand-written files in public/data that the pack neither writes nor removes.
+KEEP = {"README.md"}
+
+
 def existing_files() -> dict[str, bytes]:
     found: dict[str, bytes] = {}
     for path in sorted(c.OUT.rglob("*")):
-        if path.is_file():
+        if path.is_file() and path.relative_to(c.OUT).as_posix() not in KEEP:
             found[path.relative_to(c.OUT).as_posix()] = path.read_bytes()
     return found
 
