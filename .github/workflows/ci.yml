@@ -1,9 +1,11 @@
 name: CI
 
+# Only the env branches build. A branch runs these checks locally before its one push, so a pull request
+# runs nothing here; a manual run is there for a one-off.
 on:
   push:
     branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
