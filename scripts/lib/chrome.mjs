@@ -12,7 +12,10 @@ export const PATCHED_CHROME = "156.0.8078.73";
 const older = (version, floor) => {
   const a = version.split(".").map(Number);
   const b = floor.split(".").map(Number);
-  for (let i = 0; i < b.length; i++) if (a[i] !== b[i]) return (a[i] ?? 0) < b[i];
+  for (let i = 0; i < b.length; i++) {
+    if (!Number.isFinite(a[i])) return true; // a missing or non-numeric segment is refused
+    if (a[i] !== b[i]) return a[i] < b[i];
+  }
   return false;
 };
 
@@ -25,12 +28,17 @@ export const chromeUnusable = (err) => err?.chromeUnusable === true || /Chromium
 
 export async function launchChrome(options = {}) {
   const browser = await chromium.launch({ ...options, channel: "chrome" });
-  const version = browser.version();
-  console.log(`Chrome ${version}`);
-  if (older(version, PATCHED_CHROME)) {
+  try {
+    const version = browser.version();
+    console.log(`Chrome ${version}`);
+    if (older(version, PATCHED_CHROME)) {
+      const err = new Error(`Chrome ${version} is older than ${PATCHED_CHROME}, the first build patched for CVE-2026-118306 et al: update Chrome`);
+      throw Object.assign(err, { chromeUnusable: true });
+    }
+    return browser;
+  } catch (err) {
+    // The caller never gets a browser it would have to close, so a refused or failed check closes it here.
     await browser.close();
-    const err = new Error(`Chrome ${version} is older than ${PATCHED_CHROME}, the first build patched for CVE-2026-118306 et al: update Chrome`);
-    throw Object.assign(err, { chromeUnusable: true });
+    throw err;
   }
-  return browser;
 }
