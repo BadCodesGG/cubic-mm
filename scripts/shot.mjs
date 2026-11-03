@@ -26,16 +26,16 @@
  * --story=<id> opens `/?story=<id>&t=<--t>`: a guided story (basket, axon, layers, hub) on its fixed
  * clock, held at t story seconds. The story's caption at that moment is printed.
  *
- * Starts `next start` on port 3117, opens `/?shot=hero` in Playwright Chromium at 1600x900,
- * DPR 1, waits for the frame counter and the shot clock to settle, asserts WebGPU (unless
- * --webgl) and zero console errors, and writes `.shots/<name>-<n>.png` with the next
+ * Starts `next start` on port 3117, opens `/?shot=hero` in Google Chrome (Playwright, channel
+ * "chrome") at 1600x900, DPR 1, waits for the frame counter and the shot clock to settle, asserts
+ * WebGPU (unless --webgl) and zero console errors, and writes `.shots/<name>-<n>.png` with the next
  * free n. Several launch strategies are tried in order, since WebGPU availability in
- * automated Chromium depends on headless mode and GPU flags; the one that worked is printed.
+ * automated Chrome depends on headless mode and GPU flags; the one that worked is printed.
  */
 
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromeUnusable, launchChrome } from "./lib/chrome.mjs";
 import { ROOT, startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
 const argv = process.argv.slice(2);
@@ -80,12 +80,11 @@ const GPU_ARGS = ["--enable-unsafe-webgpu", "--enable-features=Vulkan,UseSkiaRen
 // --uncapped: frames are not held to the display's refresh, so the frame time measures the GPU work.
 if (flag("uncapped")) GPU_ARGS.push("--disable-gpu-vsync", "--disable-frame-rate-limit");
 const STRATEGIES = [
-  { label: "headless shell + GPU flags", launch: { headless: true, args: GPU_ARGS } },
-  { label: "new headless (channel chromium) + GPU flags", launch: { headless: true, channel: "chromium", args: GPU_ARGS } },
-  { label: "headed + GPU flags", launch: { headless: false, args: GPU_ARGS } },
+  { label: "headless + GPU flags", launch: { headless: true, channel: "chrome", args: GPU_ARGS } },
+  { label: "headed + GPU flags", launch: { headless: false, channel: "chrome", args: GPU_ARGS } },
   {
     label: "headless + SwiftShader WebGPU adapter",
-    launch: { headless: true, args: [...GPU_ARGS, "--use-webgpu-adapter=swiftshader"] },
+    launch: { headless: true, channel: "chrome", args: [...GPU_ARGS, "--use-webgpu-adapter=swiftshader"] },
   },
 ];
 
@@ -123,7 +122,7 @@ function layoutReport() {
 }
 
 async function attempt(strategy) {
-  const browser = await chromium.launch(strategy.launch);
+  const browser = await launchChrome(strategy.launch);
   const errors = [];
   const threeWarnings = [];
   try {
@@ -233,6 +232,10 @@ try {
     try {
       result = await attempt(strategy);
     } catch (err) {
+      // Every strategy launches the same installed Chrome, so a missing or unpatched Chrome ends the run
+      // with that error instead of falling through to "no WebGPU frame"; any other failure (a headed
+      // launch with no display, say) moves on to the next strategy.
+      if (chromeUnusable(err)) throw err;
       console.log(`  failed: ${err.message.split("\n")[0]}`);
       continue;
     }

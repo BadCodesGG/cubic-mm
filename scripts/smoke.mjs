@@ -4,7 +4,7 @@
  *   npm run build && npm run test:smoke [-- --port=3132] [--allow-software] [--skip-parity]
  *
  * Boots `next start` (it refuses to run without a build: dev mode hides prerender problems) and
- * drives it in Playwright Chromium, twice:
+ * drives it in Google Chrome (Playwright, channel "chrome"), twice:
  *   a. WebGPU on: the GPU simulation runs, a click + Space stimulates a cell, R starts a ride;
  *      /about carries the citation and the synapse count; the social image is a JPEG.
  *   b. WebGPU off (`?webgl=1`): the WebGL2 lite mode runs the CPU simulation.
@@ -22,7 +22,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 import { ROOT, startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
 const argv = process.argv.slice(2);
@@ -77,8 +77,10 @@ function watch(page) {
   return problems;
 }
 
+// The installed Google Chrome on purpose, with no fallback: Playwright's bundled Chromium is the build
+// open to CVE-2026-118306 et al. Without Chrome the launch fails with Playwright's install hint.
 async function launch(args) {
-  return chromium.launch({ headless: true, channel: "chromium", args });
+  return launchChrome({ headless: true, args });
 }
 
 async function openExperience(browser, query, viewport = VIEWPORT) {

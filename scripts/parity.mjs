@@ -3,9 +3,9 @@
  *
  *   npm run build && node scripts/parity.mjs [--port=3121] [--synth]
  *
- * Loads `/?parity=1` twice in Playwright Chromium with WebGPU on: once with the simulation on the
- * GPU (TSL compute), once with `&sim=cpu` (the Web Worker). Both run the same seed on a
- * fixed 60 Hz clock for 5 simulated seconds and stimulate the hero neuron at t = 0.3 s.
+ * Loads `/?parity=1` twice in Google Chrome (Playwright, channel "chrome") with WebGPU on: once
+ * with the simulation on the GPU (TSL compute), once with `&sim=cpu` (the Web Worker). Both run the
+ * same seed on a fixed 60 Hz clock for 5 simulated seconds and stimulate the hero neuron at t = 0.3 s.
  *
  * The two background RNGs differ (mulberry32 on the CPU, a PCG hash on the GPU), and the GPU
  * sums input in fixed point, so spike trains are compared statistically, not bit for bit:
@@ -19,7 +19,7 @@
  * Also fails on any console error or any `THREE.` warning.
  */
 
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 import { startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
 const argv = process.argv.slice(2);
@@ -80,7 +80,7 @@ const server = startDevServer(PORT, "start");
 let exitCode = 1;
 try {
   await waitForServer(BASE);
-  const browser = await chromium.launch({ headless: true, channel: "chromium", args: GPU_ARGS });
+  const browser = await launchChrome({ headless: true, args: GPU_ARGS });
   try {
     // Per-frame cost at this dataset's size and at the full cube's (1,723 cells, 190k synapses).
     const gpu = await run(browser, null, [
