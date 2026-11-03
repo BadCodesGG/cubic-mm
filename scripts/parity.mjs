@@ -4,8 +4,8 @@
  *   npm run build && node scripts/parity.mjs [--port=3121] [--synth]
  *
  * Loads `/?parity=1` twice in Google Chrome (Playwright, channel "chrome") with WebGPU on: once
- * with the simulation on the GPU (TSL compute), once with `&sim=cpu` (the Web Worker). Both run the same seed on a
- * fixed 60 Hz clock for 5 simulated seconds and stimulate the hero neuron at t = 0.3 s.
+ * with the simulation on the GPU (TSL compute), once with `&sim=cpu` (the Web Worker). Both run the
+ * same seed on a fixed 60 Hz clock for 5 simulated seconds and stimulate the hero neuron at t = 0.3 s.
  *
  * The two background RNGs differ (mulberry32 on the CPU, a PCG hash on the GPU), and the GPU
  * sums input in fixed point, so spike trains are compared statistically, not bit for bit:
