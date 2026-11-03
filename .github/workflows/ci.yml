@@ -44,17 +44,11 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Chromium comes from Playwright, cached on the lockfile because the binary only changes when
-      # the Playwright dependency does. The install still runs: it is a no-op for the binary on a
-      # cache hit, and `--with-deps` puts the system packages in place either way.
-      - name: Cache Playwright browsers
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      # The smoke test runs on Google Chrome (channel "chrome"), not Playwright's bundled Chromium.
+      # Under CI=true this installs current stable Chrome over the runner's copy, with its system
+      # packages; Chrome lives outside ~/.cache/ms-playwright, so there is nothing there to cache.
+      - name: Install Google Chrome
+        run: npx playwright install --with-deps chrome
 
       # A runner has no GPU, so WebGPU falls back to SwiftShader or is absent. --allow-software skips
       # the `isWebGPU === true` assertion and the GPU/CPU parity run (which needs real compute), but

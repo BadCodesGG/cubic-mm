@@ -80,10 +80,10 @@ npm run typecheck      # generates the Next route types, then tsc --noEmit
 npm run lint           # ESLint
 npm run test           # Vitest: data format, data integrity, the CPU model, camera and HUD logic
 npm run build          # production build
-npm run test:smoke     # boots the build, drives it in Chromium with WebGPU on and off, runs parity
+npm run test:smoke     # boots the build, drives it in Chrome with WebGPU on and off, runs parity
 ```
 
-The smoke test needs a build first and Playwright's Chromium (`npx playwright install chromium`). On a machine without a GPU, `npm run test:smoke -- --allow-software`. The social card is the static `public/og.jpg`; `NEXT_PUBLIC_SITE_URL` overrides its origin (default `https://cubic.badcodes.dev`).
+The smoke test needs a build first and Google Chrome (`npx playwright install chrome`): the scripts launch the installed Chrome, not Playwright's bundled Chromium. On a machine without a GPU, `npm run test:smoke -- --allow-software`. The social card is the static `public/og.jpg`; `NEXT_PUBLIC_SITE_URL` overrides its origin (default `https://cubic.badcodes.dev`).
 
 ### Regenerating the data
 

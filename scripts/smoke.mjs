@@ -4,7 +4,7 @@
  *   npm run build && npm run test:smoke [-- --port=3132] [--allow-software] [--skip-parity]
  *
  * Boots `next start` (it refuses to run without a build: dev mode hides prerender problems) and
- * drives it in Playwright Chromium, twice:
+ * drives it in Google Chrome (Playwright, channel "chrome"), twice:
  *   a. WebGPU on: the GPU simulation runs, a click + Space stimulates a cell, R starts a ride;
  *      /about carries the citation and the synapse count; the social image is a JPEG.
  *   b. WebGPU off (`?webgl=1`): the WebGL2 lite mode runs the CPU simulation.
@@ -78,7 +78,7 @@ function watch(page) {
 }
 
 async function launch(args) {
-  return chromium.launch({ headless: true, channel: "chromium", args });
+  return chromium.launch({ headless: true, channel: "chrome", args });
 }
 
 async function openExperience(browser, query, viewport = VIEWPORT) {
