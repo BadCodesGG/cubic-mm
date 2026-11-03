@@ -19,7 +19,7 @@
  * Also fails on any console error or any `THREE.` warning.
  */
 
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 import { startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
 const argv = process.argv.slice(2);
@@ -80,7 +80,7 @@ const server = startDevServer(PORT, "start");
 let exitCode = 1;
 try {
   await waitForServer(BASE);
-  const browser = await chromium.launch({ headless: true, channel: "chrome", args: GPU_ARGS });
+  const browser = await launchChrome({ headless: true, args: GPU_ARGS });
   try {
     // Per-frame cost at this dataset's size and at the full cube's (1,723 cells, 190k synapses).
     const gpu = await run(browser, null, [

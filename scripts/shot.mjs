@@ -35,7 +35,7 @@
 
 import { mkdir, readdir } from "node:fs/promises";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromeUnusable, launchChrome } from "./lib/chrome.mjs";
 import { ROOT, startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
 const argv = process.argv.slice(2);
@@ -122,11 +122,7 @@ function layoutReport() {
 }
 
 async function attempt(strategy) {
-  // Every strategy launches the same installed Chrome, so a failed launch (no Chrome here) ends the
-  // run with Playwright's own error instead of falling through to "no WebGPU frame".
-  const browser = await chromium.launch(strategy.launch).catch((err) => {
-    throw Object.assign(err, { launchFailed: true });
-  });
+  const browser = await launchChrome(strategy.launch);
   const errors = [];
   const threeWarnings = [];
   try {
@@ -236,7 +232,10 @@ try {
     try {
       result = await attempt(strategy);
     } catch (err) {
-      if (err.launchFailed) throw err;
+      // Every strategy launches the same installed Chrome, so a missing or unpatched Chrome ends the run
+      // with that error instead of falling through to "no WebGPU frame"; any other failure (a headed
+      // launch with no display, say) moves on to the next strategy.
+      if (chromeUnusable(err)) throw err;
       console.log(`  failed: ${err.message.split("\n")[0]}`);
       continue;
     }

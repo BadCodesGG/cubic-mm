@@ -22,7 +22,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { chromium } from "playwright";
+import { launchChrome } from "./lib/chrome.mjs";
 import { ROOT, startDevServer, stopDevServer, waitForServer } from "./lib/dev-server.mjs";
 
 const argv = process.argv.slice(2);
@@ -80,7 +80,7 @@ function watch(page) {
 // The installed Google Chrome on purpose, with no fallback: Playwright's bundled Chromium is the build
 // open to CVE-2026-118306 et al. Without Chrome the launch fails with Playwright's install hint.
 async function launch(args) {
-  return chromium.launch({ headless: true, channel: "chrome", args });
+  return launchChrome({ headless: true, args });
 }
 
 async function openExperience(browser, query, viewport = VIEWPORT) {
