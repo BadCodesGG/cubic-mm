@@ -77,6 +77,8 @@ function watch(page) {
   return problems;
 }
 
+// The installed Google Chrome on purpose, with no fallback: Playwright's bundled Chromium is the build
+// open to CVE-2026-118306 et al. Without Chrome the launch fails with Playwright's install hint.
 async function launch(args) {
   return chromium.launch({ headless: true, channel: "chrome", args });
 }

@@ -83,7 +83,7 @@ npm run build          # production build
 npm run test:smoke     # boots the build, drives it in Chrome with WebGPU on and off, runs parity
 ```
 
-The smoke test needs a build first and Google Chrome (`npx playwright install chrome`): the scripts launch the installed Chrome, not Playwright's bundled Chromium. On a machine without a GPU, `npm run test:smoke -- --allow-software`. The social card is the static `public/og.jpg`; `NEXT_PUBLIC_SITE_URL` overrides its origin (default `https://cubic.badcodes.dev`).
+The smoke test needs a build first and Google Chrome: the scripts launch the installed Chrome, not Playwright's bundled Chromium, so an older `npx playwright install chromium` setup is not enough. Without Chrome, `npx playwright install chrome` installs it (it needs an administrator shell on Windows and sudo on Linux). On a machine without a GPU, `npm run test:smoke -- --allow-software`. The social card is the static `public/og.jpg`; `NEXT_PUBLIC_SITE_URL` overrides its origin (default `https://cubic.badcodes.dev`).
 
 ### Regenerating the data
 

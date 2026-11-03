@@ -44,11 +44,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      # The smoke test runs on Google Chrome (channel "chrome"), not Playwright's bundled Chromium.
-      # Under CI=true this installs current stable Chrome over the runner's copy, with its system
-      # packages; Chrome lives outside ~/.cache/ms-playwright, so there is nothing there to cache.
+      # The smoke test runs on Google Chrome (channel "chrome"), not Playwright's bundled Chromium,
+      # whose build is open to CVE-2026-118306 et al. --force only skips Playwright's "already
+      # installed" guard (Actions sets CI, which skips it too), so this reinstalls current stable
+      # Chrome over the runner's copy, with its system packages. Chrome lives outside
+      # ~/.cache/ms-playwright, so there is nothing there to cache.
       - name: Install Google Chrome
-        run: npx playwright install --with-deps chrome
+        run: npx playwright install --with-deps --force chrome
 
       # A runner has no GPU, so WebGPU falls back to SwiftShader or is absent. --allow-software skips
       # the `isWebGPU === true` assertion and the GPU/CPU parity run (which needs real compute), but

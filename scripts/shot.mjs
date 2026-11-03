@@ -122,7 +122,11 @@ function layoutReport() {
 }
 
 async function attempt(strategy) {
-  const browser = await chromium.launch(strategy.launch);
+  // Every strategy launches the same installed Chrome, so a failed launch (no Chrome here) ends the
+  // run with Playwright's own error instead of falling through to "no WebGPU frame".
+  const browser = await chromium.launch(strategy.launch).catch((err) => {
+    throw Object.assign(err, { launchFailed: true });
+  });
   const errors = [];
   const threeWarnings = [];
   try {
@@ -232,6 +236,7 @@ try {
     try {
       result = await attempt(strategy);
     } catch (err) {
+      if (err.launchFailed) throw err;
       console.log(`  failed: ${err.message.split("\n")[0]}`);
       continue;
     }
