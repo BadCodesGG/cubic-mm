@@ -66,6 +66,8 @@ scripts/             Smoke test, GPU/CPU parity check, reproducible screenshots.
 
 Node 22 or 24.
 
+`package.json` `overrides` force `minimatch` ^11.0.8 under `@typescript-eslint/typescript-estree` (the lint parser) to clear GHSA-g3hv-75wg-m249 (minimatch >=7.0.0 <11.0.1). The parent declares an older major and only calls the named `minimatch()` export, which 11 keeps. Drop the override once it declares a fixed range (`npm view @typescript-eslint/typescript-estree dependencies`), then rerun `npm audit`.
+
 ```bash
 git clone https://github.com/BadCodesGG/cubic-mm.git
 cd cubic-mm
