@@ -99,6 +99,14 @@ const html = async (route) => {
   return { res, text: await res.text() };
 };
 
+// next.config.ts sends these on every route; checked on a served page and a static file, not only in the config.
+const FRAME_ANCESTORS = "frame-ancestors 'self' https://badcodes.dev https://www.badcodes.dev";
+function checkSecurityHeaders(label, res) {
+  const h = res.headers;
+  const ok = h.get("x-content-type-options") === "nosniff" && h.get("referrer-policy") === "strict-origin-when-cross-origin" && h.get("content-security-policy") === FRAME_ANCESTORS;
+  check(`${label} sends nosniff, the referrer policy and frame-ancestors`, ok, `${h.get("x-content-type-options")} | ${h.get("referrer-policy")} | ${h.get("content-security-policy")}`);
+}
+
 const decode = (s) => s.replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 
 async function runWebGPU(browser) {
@@ -168,6 +176,9 @@ async function runWebGPU(browser) {
   const og = await fetch(`${BASE}${new URL(ogMatch[1]).pathname}`);
   const type = og.headers.get("content-type") ?? "";
   check("OG image returns 200 image/jpeg", og.status === 200 && type.startsWith("image/jpeg"), `${og.status} ${type}`);
+  checkSecurityHeaders("/", home.res);
+  checkSecurityHeaders("/about", about.res);
+  checkSecurityHeaders("the OG image", og);
 }
 
 async function runWebGL(browser) {
