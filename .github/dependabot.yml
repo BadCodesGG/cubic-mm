@@ -1,0 +1,12 @@
+# Dependabot version updates. One pull request a week holds every minor and patch
+# update together; a major update arrives as its own pull request. Nothing merges
+# by itself: each pull request waits for a person.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
